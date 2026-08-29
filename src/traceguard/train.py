@@ -199,6 +199,19 @@ def build_training_datasets(args: argparse.Namespace):
 
 
 def train(args: argparse.Namespace) -> Path:
+    output_dir = Path(args.output_dir)
+    previous_results = [
+        path for path in (output_dir / "best.pt", output_dir / "history.json") if path.is_file()
+    ]
+    if previous_results and not args.overwrite:
+        found = ", ".join(str(path) for path in previous_results)
+        raise FileExistsError(
+            f"{output_dir} already has training results ({found}). Refusing to overwrite them. "
+            "Pick a new --output-dir for this run, e.g. checkpoints/<source>/run_XXX such as "
+            "checkpoints/cifake/run_002, or pass --overwrite if replacing this run's results is "
+            "intentional."
+        )
+
     seed_everything(args.seed)
     device = resolve_device(args.device)
     (
@@ -230,7 +243,6 @@ def train(args: argparse.Namespace) -> Path:
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
 
-    output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     best_path = output_dir / "best.pt"
     best_auc = -1.0
@@ -333,7 +345,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=4000,
         help="Source sample cap; WildFake requires a positive value",
     )
-    parser.add_argument("--output-dir", default="checkpoints")
+    parser.add_argument(
+        "--output-dir",
+        default="checkpoints",
+        help="Where best.pt/history.json are written. Use a distinct directory per run, e.g. "
+        "checkpoints/<source>/run_XXX such as checkpoints/cifake/run_002 — an existing run in "
+        "this directory is protected unless --overwrite is passed.",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Allow replacing an existing best.pt/history.json already in --output-dir",
+    )
     parser.add_argument("--backbone", default="efficientnet_b0")
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--batch-size", type=int, default=32)
