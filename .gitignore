@@ -8,6 +8,5 @@ build/
 dist/
 *.egg-info/
 data/
-outputs/
 *.jsonl
 

@@ -1,0 +1,126 @@
+{
+  "false_positives": [
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/REAL/0099.jpg",
+      "label": 0,
+      "pred": 0.9995591044425964
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/REAL/0438 (3).jpg",
+      "label": 0,
+      "pred": 0.9983730316162109
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/REAL/0756 (3).jpg",
+      "label": 0,
+      "pred": 0.9981890320777893
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/REAL/0013.jpg",
+      "label": 0,
+      "pred": 0.9977462887763977
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/REAL/0374 (6).jpg",
+      "label": 0,
+      "pred": 0.9976903200149536
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/REAL/0823.jpg",
+      "label": 0,
+      "pred": 0.9971156120300293
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/REAL/0227 (7).jpg",
+      "label": 0,
+      "pred": 0.9958611130714417
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/REAL/0431 (5).jpg",
+      "label": 0,
+      "pred": 0.9932326078414917
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/REAL/0060.jpg",
+      "label": 0,
+      "pred": 0.9926706552505493
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/REAL/0661 (4).jpg",
+      "label": 0,
+      "pred": 0.9911376237869263
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/REAL/0357 (3).jpg",
+      "label": 0,
+      "pred": 0.9911308288574219
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/REAL/0207 (10).jpg",
+      "label": 0,
+      "pred": 0.9908367395401001
+    }
+  ],
+  "false_negatives": [
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/FAKE/659.jpg",
+      "label": 1,
+      "pred": 0.004464968107640743
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/FAKE/628 (9).jpg",
+      "label": 1,
+      "pred": 0.006102144252508879
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/FAKE/657 (3).jpg",
+      "label": 1,
+      "pred": 0.006532344501465559
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/FAKE/137.jpg",
+      "label": 1,
+      "pred": 0.007662193849682808
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/FAKE/190 (6).jpg",
+      "label": 1,
+      "pred": 0.00854266993701458
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/FAKE/165 (4).jpg",
+      "label": 1,
+      "pred": 0.010638122446835041
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/FAKE/350 (6).jpg",
+      "label": 1,
+      "pred": 0.02126324363052845
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/FAKE/399 (10).jpg",
+      "label": 1,
+      "pred": 0.021942129358649254
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/FAKE/339 (6).jpg",
+      "label": 1,
+      "pred": 0.022710442543029785
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/FAKE/475 (2).jpg",
+      "label": 1,
+      "pred": 0.023141689598560333
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/FAKE/758 (9).jpg",
+      "label": 1,
+      "pred": 0.024174466729164124
+    },
+    {
+      "image_path": "/Users/lio/.cache/kagglehub/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images/versions/3/test/FAKE/768 (4).jpg",
+      "label": 1,
+      "pred": 0.02573591284453869
+    }
+  ]
+}
