@@ -48,6 +48,14 @@ def _load_batch(records: list, transform: str, value: float) -> list[Image.Image
     return images
 
 
+def _relative_image_path(path: Path, data_dir: str | Path) -> str:
+    """Serialize an error example without leaking the evaluator's absolute filesystem path."""
+    try:
+        return path.resolve().relative_to(Path(data_dir).resolve()).as_posix()
+    except ValueError:
+        return path.name
+
+
 def evaluate(args: argparse.Namespace) -> list[dict[str, object]]:
     records = discover_labeled_images(args.data_dir)
     predictor = Predictor.from_checkpoint(args.checkpoint, device=args.device)
@@ -76,7 +84,11 @@ def evaluate(args: argparse.Namespace) -> list[dict[str, object]]:
                 )
         if transform == "clean":
             clean_predictions = [
-                {"image_path": str(record.path), "label": record.label, "pred": score}
+                {
+                    "image_path": _relative_image_path(record.path, args.data_dir),
+                    "label": record.label,
+                    "pred": score,
+                }
                 for record, score in zip(records, scores)
             ]
         metrics = binary_metrics(labels, scores, predictor.threshold)

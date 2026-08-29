@@ -63,6 +63,7 @@ def diagnose(history: list[dict]) -> str:
 
     train_improving = train_losses[-1] < train_losses[0]
     val_best_epoch = min(range(len(val_losses)), key=lambda i: val_losses[i])
+    auc_best_epoch = max(range(len(aucs)), key=lambda i: aucs[i])
     val_worsening_at_end = val_losses[-1] > val_losses[val_best_epoch] * 1.02
     auc_near_chance = max(aucs) < 0.6
 
@@ -75,8 +76,8 @@ def diagnose(history: list[dict]) -> str:
     if train_improving and val_worsening_at_end and val_best_epoch < len(history) - 1:
         return (
             f"OVERFITTING signal: validation loss bottomed out at epoch {history[val_best_epoch]['epoch']} "
-            f"and rose afterward while training loss kept falling. The saved best.pt checkpoint "
-            f"(epoch {history[val_best_epoch]['epoch']}) already protects against this, but consider "
+            f"and rose afterward while training loss kept falling. Best ROC-AUC occurred at epoch "
+            f"{history[auc_best_epoch]['epoch']}, which best.pt preserves; consider "
             "stopping around there, adding regularization, or using a source-disjoint validation split "
             "if this trend looks aggressive."
         )
