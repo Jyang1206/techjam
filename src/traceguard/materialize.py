@@ -24,7 +24,7 @@ def materialize_huggingface(
     id_column: str = "img_id",
     positive_labels: tuple[int, ...] = (1, 2),
     samples_per_class: int,
-    shuffle_buffer: int = 4096,
+    shuffle_buffer: int = 200,
     seed: int = 42,
 ) -> tuple[int, int]:
     """Stream a balanced sample from a Hugging Face dataset onto disk as real/fake JPEGs.
@@ -39,7 +39,8 @@ def materialize_huggingface(
         raise RuntimeError("Install Hugging Face support with `pip install -e .`") from exc
 
     stream = load_dataset(dataset_id, config, split=split, streaming=True)
-    stream = stream.shuffle(buffer_size=shuffle_buffer, seed=seed)
+    if shuffle_buffer > 0:
+        stream = stream.shuffle(buffer_size=shuffle_buffer, seed=seed)
 
     counts = {0: 0, 1: 0}
     for index, row in enumerate(stream):
@@ -104,6 +105,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hf-id-column", default="img_id")
     parser.add_argument("--hf-positive-labels", nargs="+", type=int, default=[1, 2])
     parser.add_argument("--hf-samples-per-class", type=int, default=5000)
+    parser.add_argument(
+        "--hf-shuffle-buffer",
+        type=int,
+        default=200,
+        help="Lower = faster start (less data fetched just to prime randomization), less uniform "
+        "sampling. Streaming a large buffer over an unauthenticated, rate-limited connection can "
+        "dominate total runtime; 0 disables shuffling entirely for maximum speed.",
+    )
 
     parser.add_argument("--wildfake-manifest")
     parser.add_argument("--wildfake-images-root")
@@ -131,6 +140,7 @@ def main() -> None:
             id_column=args.hf_id_column,
             positive_labels=tuple(args.hf_positive_labels),
             samples_per_class=args.hf_samples_per_class,
+            shuffle_buffer=args.hf_shuffle_buffer,
             seed=args.seed,
         )
         print(f"{args.hf_dataset}: wrote {real} real / {fake} fake images to {output_root}")
