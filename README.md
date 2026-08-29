@@ -111,6 +111,23 @@ SID_Set is approximately 140 GB, so TraceGuard streams it from Hugging Face inst
 complete local download. Its labels are mapped as `0 -> authentic` and `1/2 -> AIGC` (fully
 synthetic or tampered). This command uses 20,000 training and 4,000 validation images by default:
 
+**Get a free Hugging Face token first** — without one, streaming is unauthenticated and rate-limited,
+which can make even a modest sample take a very long time (observed as slow as ~1/13th the speed of
+an authenticated pull). Same applies to `traceguard-materialize --hf-dataset` (see below).
+
+1. Sign up or log in at [huggingface.co](https://huggingface.co), then create a token at
+   [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) — the **Read** role is
+   enough, no write access needed.
+2. Save it locally, once, with:
+   ```bash
+   hf auth login --token hf_your_token_here
+   ```
+   (older docs may say `huggingface-cli login`; that command is deprecated in favor of `hf`.) This
+   writes to `~/.cache/huggingface/token` — outside this repo, never committed, never something to
+   put in a project file.
+
+This command uses 20,000 training and 4,000 validation images by default:
+
 ```bash
 traceguard-train --hf-dataset saberzl/SID_Set \
   --epochs 5 --batch-size 24 --workers 2 \
