@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import shutil
 from pathlib import Path
 
@@ -11,6 +12,13 @@ def _target_dir(output_root: Path, label: int) -> Path:
     directory = output_root / ("fake" if label else "real")
     directory.mkdir(parents=True, exist_ok=True)
     return directory
+
+
+def _wildfake_target_name(record_path: Path, images_root: Path, group: str) -> str:
+    """Return a stable name that remains unique when WildFake basenames collide."""
+    relative_path = record_path.resolve().relative_to(images_root.resolve())
+    digest = hashlib.sha256(relative_path.as_posix().encode("utf-8")).hexdigest()[:12]
+    return f"{group}__{digest}__{record_path.name}"
 
 
 def materialize_huggingface(
@@ -86,9 +94,10 @@ def materialize_wildfake(
     counts = {0: 0, 1: 0}
     for record in records:
         # record.group is already "wildfake__<generator>__<architecture>" (see
-        # _wildfake_group in data.py) - append the original filename so files stay unique and
-        # infer_group() can parse the same group key back out after re-discovery from disk.
-        target = _target_dir(output_root, record.label) / f"{record.group}__{record.path.name}"
+        # _wildfake_group in data.py). Include a digest of the path relative to Images/ because
+        # WildFake reuses basenames across category subdirectories within one architecture.
+        target_name = _wildfake_target_name(record.path, images_root, record.group or "unknown")
+        target = _target_dir(output_root, record.label) / target_name
         shutil.copyfile(record.path, target)
         counts[record.label] += 1
     return counts[0], counts[1]

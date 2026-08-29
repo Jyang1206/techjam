@@ -44,20 +44,25 @@ also served as training-time validation.
 
 | Condition | ROC-AUC | Balanced accuracy | FPR | FNR |
 |---|---:|---:|---:|---:|
-| Clean | 0.5467 | 0.5154 | 0.6174 | 0.3519 |
-| Best: color 1.2x | 0.5621 | 0.5408 | 0.5117 | 0.4067 |
-| Worst: blur 2.0 | 0.4705 | 0.5000 | 1.0000 | 0.0000 |
-| Resize 0.25x | 0.4748 | 0.5000 | 0.9999 | 0.0002 |
+| Clean | 0.5833 | 0.5415 | 0.2103 | 0.7067 |
+| Best: color 1.2x | 0.5985 | 0.5473 | 0.2330 | 0.6725 |
+| Worst: noise 0.1 | 0.4295 | 0.5000 | 0.0018 | 0.9982 |
+| Blur 2.0 | 0.4708 | 0.4999 | 0.9998 | 0.0005 |
+| Resize 0.25x | 0.4770 | 0.4998 | 0.9997 | 0.0007 |
 
-On clean CIFAKE, the saved threshold produces 6,174 false accusations among 10,000 real images and
-misses 3,519 of 10,000 fakes. This checkpoint is therefore not suitable for deployment as-is.
-Heavy blur and downscaling are the clearest robustness failures, consistent with the model relying
-too strongly on high-frequency forensic traces.
+On clean CIFAKE, the saved threshold produces 2,103 false accusations among 10,000 real images and
+misses 7,067 of 10,000 fakes. This checkpoint is therefore not suitable for deployment as-is.
+Heavy blur, noise, and downscaling are the clearest robustness failures, consistent with the model
+relying too strongly on fragile high-frequency forensic traces.
+
+These corrected numbers use `--tta none`, matching both CIFAKE baselines. The earlier robust-TTA
+evaluation remains available for ablation purposes, but its clean AUC was lower (0.5467), so it is
+not mixed into the comparison.
 
 ## Interpretation and next experiment
 
 The generator-disjoint validation score (0.7062) is meaningfully above chance, but it does not
-transfer to CIFAKE (0.5467). CIFAKE's native 32x32 resolution is intentionally unlike the
+transfer to CIFAKE (0.5833). CIFAKE's native 32x32 resolution is intentionally unlike the
 full-resolution training sources, so this result exposes the expected resolution/domain gap rather
 than leakage.
 
@@ -66,4 +71,5 @@ and add stronger blur/downscale/JPEG augmentation or consistency training. The m
 submission check remains WildFake's protected COCO/DALL-E-Advanced demonstration subset, which was
 excluded from every training and materialization step.
 
-Full artifacts: [`merged_run_001_cifake/`](merged_run_001_cifake/).
+Fair-comparison artifacts: [`merged_run_001_cifake_tta_none/`](merged_run_001_cifake_tta_none/).
+Robust-TTA ablation: [`merged_run_001_cifake/`](merged_run_001_cifake/).
