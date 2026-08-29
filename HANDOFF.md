@@ -94,6 +94,20 @@ cross-generator diversity a lot (this project's core theme) — `Other_based.zip
 cheapest way to get generator diversity beyond pure diffusion models, since `GAN_based.zip` (47GB)
 is the only other option and is a single non-subdividable file.
 
+**This is also exactly why you should pull from more than one WildFake generator family if at all
+possible** (not just DDIM alone): once you have 2+ distinct generators/sources, you can pass
+`--generator-disjoint-split` to `traceguard-train` (added after this handoff was first written -
+see the `traceguard-train` skill for full detail). Instead of the default random per-image
+train/validation split, it holds out **entire generator groups** for validation, so the validation
+score actually measures "does this generalize to a generator it never trained on," not just "does
+it recognize more examples of a generator it already trained on." Neither WildFake's own official
+train/test manifest split nor our default local-folder split does this (verified directly: all 26
+generator/architecture combinations in WildFake's manifest appear in both its train and test CSVs)
+— this flag is the only thing in the whole pipeline that actually tests cross-generator
+generalization *during training*, as opposed to the separate CIFAKE/demo-subset evaluation
+afterward. It needs at least 2 distinct groups per label or it raises a clear error - a single
+source (e.g. SID_Set alone, or one single WildFake generator) isn't enough to use it.
+
 ## Once both sources are materialized: train
 
 ```bash
