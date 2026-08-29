@@ -27,6 +27,7 @@ traceguard-predict = "traceguard.predict:main"
 traceguard-evaluate = "traceguard.evaluate:main"
 traceguard-train = "traceguard.train:main"
 traceguard-demo = "traceguard.app:main"
+traceguard-materialize = "traceguard.materialize:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
