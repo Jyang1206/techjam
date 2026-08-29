@@ -78,22 +78,38 @@ number gets reused by mistake. If you genuinely want to replace a run's results 
 usually you'd rather keep both and compare via the `traceguard-status` skill), pass `--overwrite`
 explicitly instead of picking a new run number.
 
-## Wanting data from multiple sources combined?
+## Training on multiple sources combined
 
-There is no `--multi-source` flag. The one supported way to train on a genuine mix without writing
-new code is to **materialize each source into one shared local folder first** (download/export each
-dataset's images into the same `data/train/real/`, `data/train/fake/` pool), then run plain
-local-folder mode against that merged folder. Before doing this, be aware of two things worth
-mentioning to the user if relevant:
+There is still no `--multi-source` flag on `traceguard-train` itself — the mutual-exclusivity check
+at the top of this skill still applies to every training invocation. But combining sources is now a
+two-step workflow instead of a manual, ad-hoc one: use the **`traceguard-materialize` skill** first
+to pull a balanced, bounded sample from SID_Set and/or WildFake into one shared local folder
+(`data/merged/real/`, `data/merged/fake/`), then train on that folder exactly like any other local
+dataset:
+
+```bash
+# Step 1 (see the traceguard-materialize skill for full detail on both sources)
+traceguard-materialize --hf-dataset saberzl/SID_Set --hf-samples-per-class 5000 \
+  --output-dir data/merged
+traceguard-materialize --wildfake-manifest ... --wildfake-images-root ... \
+  --wildfake-samples-per-class 5000 --output-dir data/merged
+
+# Step 2 - plain local-folder training, nothing new here
+traceguard-train data/merged --output-dir checkpoints/merged/run_001
+```
+
+Two things worth knowing about what ends up in that merged folder:
 
 - **SID_Set's "fake" label conflates two different things**: fully-synthetic images (label 1) and
-  AI-tampered real photos (label 2), both collapsed to `1`. CIFAKE and WildFake's fakes are purely
-  fully-synthetic. Mixing sources means your "fake" class becomes slightly less homogeneous.
-- **CIFAKE images are only 32×32 pixels**, while SID_Set/WildFake are full resolution. Mixing them
-  risks the model learning "blurry/upscaled → CIFAKE" as a shortcut rather than a genuine forensic
-  signal. A safer alternative to blending it in is to hold CIFAKE out entirely and use it as a
-  cross-distribution generalization *test set* instead (pair this with the `traceguard-evaluate`
-  skill) rather than training data.
+  AI-tampered real photos (label 2), both collapsed to `1`. WildFake's fakes are purely
+  fully-synthetic. Mixing them means your "fake" class becomes slightly less homogeneous.
+- **CIFAKE is deliberately excluded from this merge, not just unsupported.** It's natively 32×32
+  pixels, while SID_Set/WildFake are full resolution — mixing it in risks the model learning
+  "blurry/upscaled → CIFAKE's fakes" as a shortcut rather than a genuine forensic signal. It's more
+  valuable held out entirely as a cross-generator generalization *test set* instead (pair with the
+  `traceguard-evaluate` skill) — since a model trained only on SID_Set/WildFake would never have
+  seen it, evaluating against it afterward is a genuine "does this generalize" check, not just
+  another training input.
 
 ## Things this skill should always flag before running
 
