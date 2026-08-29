@@ -44,3 +44,6 @@ def test_materialize_wildfake_writes_balanced_real_fake_folders(tmp_path):
     assert "dalle_advanced" not in fake_files[0].name
     # copies are independent files, not the same inode/path as the source
     assert real_files[0].parent == output_root / "real"
+    # filenames encode generator identity for group_disjoint_split to recover later
+    assert real_files[0].name.startswith("wildfake__Real__imagenet__")
+    assert fake_files[0].name.startswith("wildfake__GAN_based__BigGAN__")

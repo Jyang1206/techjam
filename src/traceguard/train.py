@@ -16,6 +16,7 @@ from .data import (
     discover_labeled_images,
     download_kaggle_dataset,
     find_split_directory,
+    group_disjoint_split,
     limit_records,
     stratified_split,
     wildfake_records_from_manifest,
@@ -178,7 +179,8 @@ def build_training_datasets(args: argparse.Namespace):
         )
 
     records = discover_labeled_images(args.data_dir)
-    train_records, validation_records = stratified_split(records, args.val_fraction, args.seed)
+    split_fn = group_disjoint_split if args.generator_disjoint_split else stratified_split
+    train_records, validation_records = split_fn(records, args.val_fraction, args.seed)
     train_dataset = LabeledImageDataset(train_records, build_train_transform())
     validation_dataset = LabeledImageDataset(validation_records, build_eval_transform())
     fake_count = sum(record.label == 1 for record in train_records)
@@ -365,6 +367,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--positive-weight", type=float)
     parser.add_argument("--val-fraction", type=float, default=0.15)
+    parser.add_argument(
+        "--generator-disjoint-split",
+        action="store_true",
+        help="Local-folder mode only: hold out whole generator/source groups for validation "
+        "instead of a random per-image split, so validation genuinely tests generators unseen "
+        "during training. Only meaningful when images were named by traceguard-materialize "
+        "(which encodes generator identity in the filename) - plain local folders with no "
+        "recoverable group identity will raise an error rather than silently no-op.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--no-pretrained", action="store_true")

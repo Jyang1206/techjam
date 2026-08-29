@@ -54,7 +54,11 @@ def materialize_huggingface(
         except (KeyError, OSError, TypeError, ValueError):
             continue
         identifier = str(row.get(id_column, index))
-        target = _target_dir(output_root, label) / f"{dataset_id.split('/')[-1]}_{identifier}.jpg"
+        slug = dataset_id.split("/")[-1]
+        # "hf__<dataset_slug>__<identifier>" - parsed back out by infer_group() for
+        # group_disjoint_split. HF datasets don't carry a per-image generator/architecture column
+        # the way WildFake's manifest does, so the whole dataset becomes one group.
+        target = _target_dir(output_root, label) / f"hf__{slug}__{identifier}.jpg"
         image.convert("RGB").save(target, format="JPEG", quality=95)
         counts[label] += 1
         if sum(counts.values()) % 500 == 0:
@@ -81,7 +85,10 @@ def materialize_wildfake(
     )
     counts = {0: 0, 1: 0}
     for record in records:
-        target = _target_dir(output_root, record.label) / f"wildfake_{record.path.name}"
+        # record.group is already "wildfake__<generator>__<architecture>" (see
+        # _wildfake_group in data.py) - append the original filename so files stay unique and
+        # infer_group() can parse the same group key back out after re-discovery from disk.
+        target = _target_dir(output_root, record.label) / f"{record.group}__{record.path.name}"
         shutil.copyfile(record.path, target)
         counts[record.label] += 1
     return counts[0], counts[1]

@@ -19,6 +19,28 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
 class ImageRecord:
     path: Path
     label: int
+    group: str | None = None
+    """Best-effort generator/source identity, e.g. "wildfake__Diffusion_based__SD" or
+    "hf__SID_Set". Used by group_disjoint_split to hold out whole generators rather than random
+    individual images. None when no such identity is known or inferable."""
+
+
+def infer_group(path: Path) -> str:
+    """Best-effort group key parsed from a materialized filename (see materialize.py).
+
+    Recognizes traceguard-materialize's own naming conventions
+    (wildfake__<generator>__<architecture>__<name>, hf__<dataset_slug>__<identifier>) so a
+    generator-disjoint split still works after re-discovering images from a plain folder, where
+    per-record metadata from the original manifest/dataset no longer exists. Falls back to
+    "unknown" for anything else - such records will all land in a single group, effectively
+    falling back to per-image behavior for that subset when used with group_disjoint_split.
+    """
+    parts = path.name.split("__")
+    if parts[0] == "wildfake" and len(parts) >= 3:
+        return "__".join(parts[:3])
+    if parts[0] == "hf" and len(parts) >= 2:
+        return "__".join(parts[:2])
+    return "unknown"
 
 
 def image_paths(directory: str | Path) -> list[Path]:
@@ -67,8 +89,8 @@ def discover_labeled_images(root: str | Path) -> list[ImageRecord]:
     root = Path(root)
     real_directory = child_directory(root, "real")
     fake_directory = child_directory(root, "fake")
-    records = [ImageRecord(path, 0) for path in image_paths(real_directory)]
-    records.extend(ImageRecord(path, 1) for path in image_paths(fake_directory))
+    records = [ImageRecord(path, 0, infer_group(path)) for path in image_paths(real_directory)]
+    records.extend(ImageRecord(path, 1, infer_group(path)) for path in image_paths(fake_directory))
     if not records:
         raise ValueError(f"No images found. Expected `{root / 'real'}` and `{root / 'fake'}`.")
     if not any(record.label == 0 for record in records) or not any(
@@ -106,6 +128,12 @@ def download_kaggle_dataset(handle: str) -> Path:
     except ImportError as exc:  # pragma: no cover - dependency error is user-facing
         raise RuntimeError("Install Kaggle support with `pip install -e .`") from exc
     return Path(kagglehub.dataset_download(handle))
+
+
+def _wildfake_group(row: dict[str, str]) -> str:
+    generator = row.get("Generator", "unknown").strip() or "unknown"
+    architecture = row.get("Architecture", "unknown").strip() or "unknown"
+    return f"wildfake__{generator}__{architecture}"
 
 
 def _wildfake_protected_row(row: dict[str, str]) -> bool:
@@ -169,7 +197,7 @@ def wildfake_records_from_manifest(
             if not image_path.is_file():
                 continue
             seen[label] += 1
-            record = ImageRecord(image_path, label)
+            record = ImageRecord(image_path, label, _wildfake_group(row))
             reservoir = reservoirs[label]
             if len(reservoir) < targets[label]:
                 reservoir.append(record)
@@ -202,6 +230,58 @@ def stratified_split(
         count = max(1, round(len(group) * validation_fraction))
         validation.extend(group[:count])
         train.extend(group[count:])
+    generator.shuffle(train)
+    generator.shuffle(validation)
+    return train, validation
+
+
+def group_disjoint_split(
+    records: Sequence[ImageRecord], validation_fraction: float, seed: int
+) -> tuple[list[ImageRecord], list[ImageRecord]]:
+    """Like stratified_split, but holds out whole generator/source groups for validation instead
+    of individual images.
+
+    A random image-level split can put near-identical images from the same generator on both
+    sides, so a high validation score may just mean "this generator's style is memorized" rather
+    than genuine generalization. This holds out entire groups (parsed via each record's `group`
+    field, falling back to infer_group(record.path) when not set) so validation only ever contains
+    generators/sources absent from training - a real test of whether the model generalizes beyond
+    what it trained on, not just whether it recognizes held-back examples of the same thing.
+
+    Records with no identifiable group (`group` is None and infer_group returns "unknown") are all
+    treated as one group and will land entirely on one side - effectively falling back to
+    per-image behavior for that unlabeled subset. Raises if a label has fewer than 2 distinct
+    groups, since a group-disjoint split is meaningless with nothing to hold out.
+    """
+    if not 0 < validation_fraction < 1:
+        raise ValueError("validation_fraction must be between 0 and 1")
+    generator = random.Random(seed)
+    train: list[ImageRecord] = []
+    validation: list[ImageRecord] = []
+    for label in (0, 1):
+        label_records = [record for record in records if record.label == label]
+        by_group: dict[str, list[ImageRecord]] = {}
+        for record in label_records:
+            key = record.group or infer_group(record.path)
+            by_group.setdefault(key, []).append(record)
+        if len(by_group) < 2:
+            raise ValueError(
+                f"Only {len(by_group)} distinct group(s) found for label {label} - a "
+                "group-disjoint split needs at least 2 to hold one out. Use stratified_split "
+                "instead if your data has no recoverable generator/source identity."
+            )
+        group_keys = list(by_group)
+        generator.shuffle(group_keys)
+        target = round(len(label_records) * validation_fraction)
+        validation_keys: set[str] = set()
+        validation_count = 0
+        for key in group_keys:
+            if validation_count >= target:
+                break
+            validation_keys.add(key)
+            validation_count += len(by_group[key])
+        for key, items in by_group.items():
+            (validation if key in validation_keys else train).extend(items)
     generator.shuffle(train)
     generator.shuffle(validation)
     return train, validation

@@ -94,9 +94,34 @@ traceguard-materialize --hf-dataset saberzl/SID_Set --hf-samples-per-class 5000 
 traceguard-materialize --wildfake-manifest ... --wildfake-images-root ... \
   --wildfake-samples-per-class 5000 --output-dir data/merged
 
-# Step 2 - plain local-folder training, nothing new here
+# Step 2 - plain local-folder training. Add --generator-disjoint-split (see below) once you
+# have images from more than one generator/source per label.
 traceguard-train data/merged --output-dir checkpoints/merged/run_001
 ```
+
+## Generator-disjoint validation (`--generator-disjoint-split`)
+
+By default, local-folder training's internal train/validation split is random and blind to which
+generator or source an image came from (`stratified_split`) — meaning the same generator can (and
+usually will) show up on both sides. That validation score then mostly answers "does the model
+recognize more examples of a generator it already trained on," not "does it generalize to a
+generator it's never seen" — the thing this whole project is actually trying to measure.
+
+`--generator-disjoint-split` fixes this by holding out **whole generator/source groups** for
+validation instead of random individual images — `group_disjoint_split` in `data.py`. It only works
+when images were named by `traceguard-materialize`, since that's what encodes generator identity
+into the filename (`wildfake__<generator>__<architecture>__...`, `hf__<dataset_slug>__...`) —
+`infer_group()` parses it back out when re-discovering images from a plain folder. Plain images with
+no such naming fall into a single "unknown" group.
+
+**This needs at least 2 distinct groups per label to mean anything** — it raises a clear error
+otherwise rather than silently falling back to something else. A SID_Set-only merge has exactly one
+group per label (the whole HF dataset has no per-image generator column), so this flag only becomes
+usable once you've added a second source with real generator/architecture variety — WildFake, whose
+manifest tracks this per image. Once you have, say, 5 WildFake generator families plus SID_Set
+mixed in, validation will hold out some of those generators entirely, giving a real read on
+cross-generator generalization *during training itself* — not just from the separate CIFAKE
+evaluation afterward.
 
 Two things worth knowing about what ends up in that merged folder:
 
