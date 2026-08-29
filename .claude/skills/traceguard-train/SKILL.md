@@ -122,3 +122,20 @@ mentioning to the user if relevant:
 Training prints one summary line per epoch to the terminal it was launched from; that live output
 is not captured anywhere else, so check the launching terminal for progress if the run is still
 going, or inspect `history.json` once it completes.
+
+## Sharing a checkpoint with the team
+
+`checkpoints/` is version-controlled and `.pt` files are tracked through **Git LFS** (not plain
+git) — this keeps repo history lean even as more runs get added. If a run is worth sharing, commit
+it like any other file:
+
+```bash
+git add checkpoints/<source>/run_XXX/best.pt checkpoints/<source>/run_XXX/history.json
+git commit -m "add <source> run_XXX checkpoint (val AUC X.XXXX)"
+```
+
+**Anyone pulling the repo needs Git LFS installed once** (`brew install git-lfs && git lfs install`,
+or the equivalent for their OS) before cloning/pulling — without it they'll only get small pointer
+files instead of the actual model weights. Not every experimental run needs to be pushed — use
+judgment about which checkpoints are actually worth the team having (e.g. the best one per source,
+not every intermediate epoch-count experiment).

@@ -59,9 +59,11 @@ Notes:
 
 - Step 2's checkpoint path (`checkpoints/cifake/best.pt`) is whatever you passed to
   `--output-dir` plus `best.pt` — reuse that exact path in steps 3-5.
-- Model weights are not committed to this repository (`checkpoints/*.pt` is gitignored). Every
-  checkpoint you use must come from a training run you performed locally, or from a weights
-  release/artifact you fetch separately and document.
+- Checkpoints worth sharing are committed to this repository under `checkpoints/<source>/run_XXX/`,
+  with `.pt` files tracked via **Git LFS** rather than plain git so they don't bloat repo history.
+  Install Git LFS once before cloning/pulling (`brew install git-lfs && git lfs install`, or your
+  OS's equivalent) — without it you'll only get small pointer files instead of real model weights.
+  Not every checkpoint is pushed; if the one you need isn't there, train it yourself locally.
 - Step 3's target directory just needs images (any mix of real/fake, unlabeled) — it produces a
   score per image. Step 4 needs a **labeled** folder with `real/` and `fake/` subfolders because it
   needs ground truth to compute accuracy/AUC.
