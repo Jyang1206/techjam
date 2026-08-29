@@ -18,6 +18,55 @@ forensic model as ground truth.
 - A Gradio demo for individual inspection, stability probes, and batch JSON export.
 - Focused tests for metrics, transformations, dataset discovery, and output behavior.
 
+## Quickstart: run everything end-to-end
+
+This is the fastest path from a clean checkout to a working model, predictions, a robustness
+report, and a live demo. Each step links to the fuller section below if you need more detail or
+want a different dataset.
+
+```bash
+# 1. Install (see "Setup" below for details)
+python -m venv .venv
+source .venv/bin/activate   # .venv\Scripts\activate on Windows
+pip install --upgrade pip
+pip install -e ".[dev]"
+
+# 2. Train a model. This example downloads CIFAKE via Kaggle and trains in one step
+#    (requires a Kaggle account/API token the first time). See "Data layout" and the
+#    dataset-specific sections below for SID_Set, WildFake, or your own local folders.
+traceguard-train --kaggle-dataset birdy654/cifake-real-and-ai-generated-synthetic-images \
+  --epochs 5 --batch-size 64 --workers 2 \
+  --output-dir checkpoints/cifake
+
+# 3. Score a directory of images (this is the required challenge deliverable script,
+#    see "Required inference output" below)
+traceguard-predict path/to/image_directory \
+  --checkpoint checkpoints/cifake/best.pt \
+  --output predictions.json
+
+# 4. Run the robustness benchmark against a labeled real/ + fake/ test folder
+#    (see "Robustness evaluation" below). This writes the table for Devpost.
+traceguard-evaluate data/test \
+  --checkpoint checkpoints/cifake/best.pt \
+  --output-dir outputs/evaluation
+
+# 5. Launch the interactive demo (see "Demo" below) — good for the submission video
+traceguard-demo --checkpoint checkpoints/cifake/best.pt
+# then open http://127.0.0.1:7860
+```
+
+Notes:
+
+- Step 2's checkpoint path (`checkpoints/cifake/best.pt`) is whatever you passed to
+  `--output-dir` plus `best.pt` — reuse that exact path in steps 3-5.
+- Model weights are not committed to this repository (`checkpoints/*.pt` is gitignored). Every
+  checkpoint you use must come from a training run you performed locally, or from a weights
+  release/artifact you fetch separately and document.
+- Step 3's target directory just needs images (any mix of real/fake, unlabeled) — it produces a
+  score per image. Step 4 needs a **labeled** folder with `real/` and `fake/` subfolders because it
+  needs ground truth to compute accuracy/AUC.
+- Run `pytest` at any point to check the test suite still passes: `pytest -q`.
+
 ## Setup
 
 Python 3.10-3.12 is recommended. Create an environment and install the project:
