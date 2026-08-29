@@ -35,6 +35,11 @@ transform suite —
 Use `--transforms jpeg blur` (space-separated, choices are the transform names above) to run only a
 subset instead of the full suite — useful for a quick check. Default is `all`.
 
+Scoring is batched (`--batch-size`, default 64) — images are grouped into batches and scored with
+one model forward pass per batch rather than one call per image, which matters a lot on GPU/MPS
+where per-call overhead dominates at batch size 1. A progress line prints periodically within each
+condition (`  jpeg_30       1280/20000`) so a long run stays observable instead of looking stuck.
+
 ## CRITICAL — avoid evaluating on data that already influenced the checkpoint
 
 If the checkpoint was trained via the Kaggle/CIFAKE path, its "validation" set during training was

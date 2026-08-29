@@ -40,6 +40,14 @@ def write_summary(rows: list[dict[str, object]], output: Path) -> None:
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _load_batch(records: list, transform: str, value: float) -> list[Image.Image]:
+    images = []
+    for record in records:
+        with Image.open(record.path) as source:
+            images.append(apply_degradation(source.convert("RGB"), transform, value))
+    return images
+
+
 def evaluate(args: argparse.Namespace) -> list[dict[str, object]]:
     records = discover_labeled_images(args.data_dir)
     predictor = Predictor.from_checkpoint(args.checkpoint, device=args.device)
@@ -52,25 +60,31 @@ def evaluate(args: argparse.Namespace) -> list[dict[str, object]]:
     conditions.extend((name, value) for name, values in selected.items() for value in values)
     metric_rows: list[dict[str, object]] = []
     clean_predictions: list[dict[str, object]] = []
+    progress_every = max(1, (len(records) // args.batch_size) // 5 or 1)
 
     for transform, value in conditions:
-        labels: list[int] = []
+        labels = [record.label for record in records]
         scores: list[float] = []
-        for record in records:
-            with Image.open(record.path) as source:
-                image = apply_degradation(source.convert("RGB"), transform, value)
-            score = predictor.score_image(image, tta=args.tta)
-            labels.append(record.label)
-            scores.append(score)
-            if transform == "clean":
-                clean_predictions.append(
-                    {"image_path": str(record.path), "label": record.label, "pred": score}
+        for batch_index, start in enumerate(range(0, len(records), args.batch_size)):
+            chunk = records[start : start + args.batch_size]
+            images = _load_batch(chunk, transform, value)
+            scores.extend(predictor.score_images(images, tta=args.tta))
+            if batch_index % progress_every == 0:
+                print(
+                    f"  {condition_name(transform, value):<14} {len(scores)}/{len(records)}",
+                    flush=True,
                 )
+        if transform == "clean":
+            clean_predictions = [
+                {"image_path": str(record.path), "label": record.label, "pred": score}
+                for record, score in zip(records, scores)
+            ]
         metrics = binary_metrics(labels, scores, predictor.threshold)
         metric_rows.append({"condition": condition_name(transform, value), **metrics})
         print(
             f"{metric_rows[-1]['condition']:<14} "
-            f"bal_acc={metrics['balanced_accuracy']:.3f} auc={metrics['roc_auc']:.3f}"
+            f"bal_acc={metrics['balanced_accuracy']:.3f} auc={metrics['roc_auc']:.3f}",
+            flush=True,
         )
 
     output_dir = Path(args.output_dir)
@@ -120,6 +134,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=["all"],
     )
     parser.add_argument("--tta", choices=("none", "robust"), default="robust")
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        help="Images scored per forward pass. Higher is faster up to your device's memory limit.",
+    )
     parser.add_argument("--device", default="auto")
     parser.add_argument("--error-examples", type=int, default=12)
     return parser

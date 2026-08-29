@@ -73,6 +73,30 @@ class Predictor:
         logits = self.model(batch) / self.temperature
         return float(torch.sigmoid(logits).mean().cpu())
 
+    @torch.inference_mode()
+    def score_images(self, images: list[Image.Image], tta: str = "robust") -> list[float]:
+        """Score a whole batch of already-degraded images in one forward pass.
+
+        Unlike score_image, this fires a single model call for the entire batch instead of one
+        call per image, which is far more efficient on GPU/MPS where per-call overhead dominates
+        at batch size 1. TTA views are folded into the same batch dimension and averaged back out
+        per image afterward.
+        """
+        if tta not in TTA_PRESETS:
+            raise ValueError(f"Unknown TTA preset: {tta}")
+        if not images:
+            return []
+        presets = TTA_PRESETS[tta]
+        tensors = [
+            self.transform(apply_degradation(ensure_rgb(image), name, value))
+            for image in images
+            for name, value in presets
+        ]
+        batch = torch.stack(tensors).to(self.device)
+        logits = self.model(batch) / self.temperature
+        probabilities = torch.sigmoid(logits).view(len(images), len(presets)).mean(dim=1)
+        return probabilities.cpu().tolist()
+
     def stability_profile(self, image: Image.Image) -> list[dict[str, float | str]]:
         probes = [
             ("Clean", "clean", 1.0),
