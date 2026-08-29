@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "traceguard"
+version = "0.1.0"
+description = "Robust, explainable AI-generated image detection"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+  "datasets>=3.0,<5",
+  "gradio>=6.0,<7",
+  "kagglehub>=0.3,<1",
+  "numpy>=1.26,<3",
+  "Pillow>=10.0,<12",
+  "timm>=1.0,<2",
+  "torch>=2.2,<3",
+  "torchvision>=0.17,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+traceguard-predict = "traceguard.predict:main"
+traceguard-evaluate = "traceguard.evaluate:main"
+traceguard-train = "traceguard.train:main"
+traceguard-demo = "traceguard.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
