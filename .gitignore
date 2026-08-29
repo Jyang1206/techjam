@@ -7,7 +7,6 @@ venv/
 build/
 dist/
 *.egg-info/
-checkpoints/
 data/
 outputs/
 *.jsonl
