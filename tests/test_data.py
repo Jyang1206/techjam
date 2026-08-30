@@ -12,12 +12,15 @@ from traceguard.data import (
     child_directory,
     decode_dataset_image,
     discover_labeled_images,
+    external_validation_split,
     fake_generator_disjoint_split,
+    fake_generator_holdout_split,
     find_split_directory,
     group_disjoint_split,
     image_paths,
     infer_group,
     limit_records,
+    materialized_record_key,
     stratified_split,
     wildfake_records_from_manifest,
 )
@@ -133,7 +136,37 @@ def test_infer_group_parses_materialize_naming_conventions():
         "wildfake__Diffusion_based__SD"
     )
     assert infer_group(Path("hf__SID_Set__0000a1229c025d92.jpg")) == "hf__SID_Set"
+    assert infer_group(Path("hf__SID_Set__label_2__tampered_001.jpg")) == (
+        "hf__SID_Set__label_2"
+    )
     assert infer_group(Path("random_photo.jpg")) == "unknown"
+
+
+def test_materialized_record_key_matches_old_and_subtype_aware_hf_names():
+    old = ImageRecord(Path("hf__SID_Set__tampered_001.jpg"), 1)
+    grouped = ImageRecord(Path("hf__SID_Set__label_2__tampered_001.jpg"), 1)
+    assert materialized_record_key(old) == materialized_record_key(grouped)
+
+
+def test_external_validation_split_excludes_matching_materialized_records():
+    records = [
+        ImageRecord(Path("hf__SID_Set__label_0__real_a.jpg"), 0),
+        ImageRecord(Path("hf__SID_Set__label_0__real_b.jpg"), 0),
+        ImageRecord(Path("wildfake__Other_based__MAGE__digest__fake.png"), 1),
+        ImageRecord(Path("wildfake__Diffusion_based__DDPM__digest__train.png"), 1),
+    ]
+    validation = [
+        ImageRecord(Path("hf__SID_Set__real_a.jpg"), 0),
+        ImageRecord(Path("wildfake__Other_based__MAGE__digest__fake.png"), 1),
+    ]
+
+    train, held = external_validation_split(records, validation)
+
+    assert {record.path.name for record in train} == {
+        "hf__SID_Set__label_0__real_b.jpg",
+        "wildfake__Diffusion_based__DDPM__digest__train.png",
+    }
+    assert held == validation
 
 
 def test_discover_labeled_images_infers_group_from_filenames(tmp_path):
@@ -220,3 +253,29 @@ def test_fake_generator_split_stratifies_reals_and_holds_out_fake_groups():
         "real_faces",
         "real_objects",
     }
+
+
+def test_explicit_fake_generator_holdout_is_stable_when_other_groups_grow():
+    records = []
+    for source in ("real_faces", "real_objects"):
+        records.extend(ImageRecord(Path(f"/{source}/{i}.jpg"), 0, source) for i in range(20))
+    records.extend(ImageRecord(Path(f"/large/{i}.jpg"), 1, "large_train") for i in range(100))
+    records.extend(ImageRecord(Path(f"/small/{i}.jpg"), 1, "held_out") for i in range(7))
+
+    train, validation = fake_generator_holdout_split(
+        records, 0.25, seed=42, validation_fake_groups=["held_out"]
+    )
+
+    assert {record.group for record in validation if record.label == 1} == {"held_out"}
+    assert {record.group for record in train if record.label == 1} == {"large_train"}
+    assert sum(record.label == 0 for record in validation) == 10
+
+
+def test_explicit_fake_generator_holdout_rejects_missing_group():
+    records = [
+        ImageRecord(Path("/real/a.jpg"), 0, "real"),
+        ImageRecord(Path("/fake/a.jpg"), 1, "fake_a"),
+        ImageRecord(Path("/fake/b.jpg"), 1, "fake_b"),
+    ]
+    with pytest.raises(ValueError, match="absent"):
+        fake_generator_holdout_split(records, 0.2, 42, ["not_present"])

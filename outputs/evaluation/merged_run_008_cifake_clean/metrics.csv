@@ -1,0 +1,2 @@
+condition,samples,accuracy,balanced_accuracy,precision,recall,f1,roc_auc,brier,false_positive_rate,false_negative_rate
+clean,20000,0.4935,0.4935,0.4966971544715447,0.9775,0.6586927223719677,0.320433805,0.46506770487096066,0.9905,0.0225

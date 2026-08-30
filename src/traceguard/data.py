@@ -39,8 +39,38 @@ def infer_group(path: Path) -> str:
     if parts[0] == "wildfake" and len(parts) >= 3:
         return "__".join(parts[:3])
     if parts[0] == "hf" and len(parts) >= 2:
+        if len(parts) >= 3 and parts[2].startswith("label_"):
+            return "__".join(parts[:3])
         return "__".join(parts[:2])
     return "unknown"
+
+
+def materialized_record_key(record: ImageRecord) -> tuple[int, str]:
+    """Match the same materialized item across old and subtype-aware HF filenames."""
+    parts = record.path.name.split("__")
+    if parts[0] == "hf" and len(parts) >= 3:
+        identifier_start = 3 if parts[2].startswith("label_") else 2
+        return record.label, "__".join((parts[0], parts[1], *parts[identifier_start:]))
+    return record.label, record.path.name
+
+
+def external_validation_split(
+    records: Sequence[ImageRecord], validation_records: Sequence[ImageRecord]
+) -> tuple[list[ImageRecord], list[ImageRecord]]:
+    """Exclude an explicit validation folder from a larger materialized training pool."""
+    validation_keys = {materialized_record_key(record) for record in validation_records}
+    available_keys = {materialized_record_key(record) for record in records}
+    missing_keys = validation_keys - available_keys
+    if missing_keys:
+        examples = ", ".join(key for _, key in sorted(missing_keys)[:5])
+        raise ValueError(
+            f"{len(missing_keys)} explicit validation image(s) are absent from the training "
+            f"pool; examples: {examples}"
+        )
+    train = [record for record in records if materialized_record_key(record) not in validation_keys]
+    if not train:
+        raise ValueError("Explicit validation folder would leave no images for training")
+    return train, list(validation_records)
 
 
 def image_paths(directory: str | Path) -> list[Path]:
@@ -343,6 +373,58 @@ def fake_generator_disjoint_split(
     fake_train, fake_validation = _split_label_by_group(
         fake_records, validation_fraction, random.Random(seed + 1)
     )
+    train = [*real_train, *fake_train]
+    validation = [*real_validation, *fake_validation]
+    generator.shuffle(train)
+    generator.shuffle(validation)
+    return train, validation
+
+
+def fake_generator_holdout_split(
+    records: Sequence[ImageRecord],
+    validation_fraction: float,
+    seed: int,
+    validation_fake_groups: Sequence[str],
+) -> tuple[list[ImageRecord], list[ImageRecord]]:
+    """Use an explicit fake-generator holdout while stratifying authentic images.
+
+    This is the reproducible counterpart to :func:`fake_generator_disjoint_split`: scaling one
+    source can otherwise change which group subset happens to be closest to ``validation_fraction``
+    and silently turn a data-scale experiment into a different validation task.
+    """
+    if not 0 < validation_fraction < 1:
+        raise ValueError("validation_fraction must be between 0 and 1")
+    requested_groups = set(validation_fake_groups)
+    if not requested_groups:
+        raise ValueError("At least one validation fake group is required")
+
+    real_records = [record for record in records if record.label == 0]
+    fake_records = [record for record in records if record.label == 1]
+    if not real_records or not fake_records:
+        raise ValueError("Both real and fake records are required")
+
+    available_groups = {record.group or infer_group(record.path) for record in fake_records}
+    missing_groups = requested_groups - available_groups
+    if missing_groups:
+        raise ValueError(
+            "Validation fake groups are absent from the dataset: "
+            + ", ".join(sorted(missing_groups))
+        )
+    if requested_groups == available_groups:
+        raise ValueError("Explicit validation groups would leave no fake images for training")
+
+    generator = random.Random(seed)
+    generator.shuffle(real_records)
+    real_validation_count = max(1, round(len(real_records) * validation_fraction))
+    real_validation = real_records[:real_validation_count]
+    real_train = real_records[real_validation_count:]
+
+    fake_train: list[ImageRecord] = []
+    fake_validation: list[ImageRecord] = []
+    for record in fake_records:
+        group = record.group or infer_group(record.path)
+        (fake_validation if group in requested_groups else fake_train).append(record)
+
     train = [*real_train, *fake_train]
     validation = [*real_validation, *fake_validation]
     generator.shuffle(train)

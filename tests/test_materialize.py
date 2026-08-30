@@ -1,13 +1,98 @@
 import csv
+import sys
+from types import SimpleNamespace
 
 from PIL import Image
 
-from traceguard.materialize import materialize_wildfake
+from traceguard.data import discover_labeled_images
+from traceguard.materialize import materialize_huggingface, materialize_wildfake
 
 
 def create_image(path):
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (12, 12), "white").save(path)
+
+
+def test_materialize_huggingface_can_sample_and_group_original_labels(tmp_path, monkeypatch):
+    rows = [
+        {"image": Image.new("RGB", (12, 12), "white"), "label": label, "img_id": f"{label}_{i}"}
+        for label in (0, 1, 2)
+        for i in range(3)
+    ]
+
+    class FakeStream(list):
+        def shuffle(self, **_kwargs):
+            return self
+
+        def skip(self, count):
+            return FakeStream(self[count:])
+
+    monkeypatch.setitem(
+        sys.modules,
+        "datasets",
+        SimpleNamespace(load_dataset=lambda *_args, **_kwargs: FakeStream(rows)),
+    )
+    output_root = tmp_path / "merged"
+
+    counts = materialize_huggingface(
+        "saberzl/SID_Set",
+        output_root=output_root,
+        samples_per_class=1,
+        samples_per_label={0: 2, 1: 2, 2: 2},
+        group_by_label=True,
+        shuffle_buffer=0,
+    )
+
+    assert counts == (2, 4)
+    records = discover_labeled_images(output_root)
+    assert {record.group for record in records} == {
+        "hf__SID_Set__label_0",
+        "hf__SID_Set__label_1",
+        "hf__SID_Set__label_2",
+    }
+
+
+def test_materialize_huggingface_resumes_per_label_targets(tmp_path, monkeypatch):
+    rows = [
+        {"image": Image.new("RGB", (12, 12), "white"), "label": label, "img_id": f"{label}_{i}"}
+        for label in (0, 1, 2)
+        for i in range(3)
+    ]
+
+    class FakeStream(list):
+        def shuffle(self, **_kwargs):
+            return self
+
+        def skip(self, count):
+            return FakeStream(self[count:])
+
+    monkeypatch.setitem(
+        sys.modules,
+        "datasets",
+        SimpleNamespace(load_dataset=lambda *_args, **_kwargs: FakeStream(rows)),
+    )
+    output_root = tmp_path / "merged"
+    materialize_huggingface(
+        "saberzl/SID_Set",
+        output_root=output_root,
+        samples_per_class=1,
+        samples_per_label={0: 2, 1: 2, 2: 2},
+        group_by_label=True,
+        shuffle_buffer=0,
+    )
+
+    counts = materialize_huggingface(
+        "saberzl/SID_Set",
+        output_root=output_root,
+        samples_per_class=1,
+        samples_per_label={0: 3, 1: 3, 2: 3},
+        group_by_label=True,
+        shuffle_buffer=0,
+    )
+
+    assert counts == (3, 6)
+    assert len(list((output_root / "real").iterdir())) == 3
+    assert len(list((output_root / "fake").iterdir())) == 6
 
 
 def test_materialize_wildfake_writes_balanced_real_fake_folders(tmp_path):

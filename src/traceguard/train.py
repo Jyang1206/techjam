@@ -17,7 +17,9 @@ from .data import (
     LabeledImageDataset,
     discover_labeled_images,
     download_kaggle_dataset,
+    external_validation_split,
     fake_generator_disjoint_split,
+    fake_generator_holdout_split,
     find_split_directory,
     group_disjoint_split,
     limit_records,
@@ -254,15 +256,48 @@ def build_training_datasets(args: argparse.Namespace, model_config: ModelConfig 
         )
 
     records = discover_labeled_images(args.data_dir)
+    if args.validation_dir:
+        if (
+            args.generator_disjoint_split
+            or args.fake_generator_disjoint_split
+            or args.validation_fake_groups
+        ):
+            raise ValueError(
+                "--validation-dir replaces generator split flags and --validation-fake-groups"
+            )
+        train_records, validation_records = external_validation_split(
+            records, discover_labeled_images(args.validation_dir)
+        )
+    else:
+        train_records = validation_records = None
     if args.generator_disjoint_split and args.fake_generator_disjoint_split:
         raise ValueError("Choose only one generator-disjoint split mode")
-    if args.fake_generator_disjoint_split:
-        split_fn = fake_generator_disjoint_split
+    if args.validation_fake_groups and not args.fake_generator_disjoint_split:
+        raise ValueError(
+            "--validation-fake-groups requires --fake-generator-disjoint-split"
+        )
+    if args.validation_dir:
+        pass
+    elif args.fake_generator_disjoint_split:
+        if args.validation_fake_groups:
+            train_records, validation_records = fake_generator_holdout_split(
+                records,
+                args.val_fraction,
+                args.seed,
+                args.validation_fake_groups,
+            )
+        else:
+            train_records, validation_records = fake_generator_disjoint_split(
+                records, args.val_fraction, args.seed
+            )
     elif args.generator_disjoint_split:
-        split_fn = group_disjoint_split
+        train_records, validation_records = group_disjoint_split(
+            records, args.val_fraction, args.seed
+        )
     else:
-        split_fn = stratified_split
-    train_records, validation_records = split_fn(records, args.val_fraction, args.seed)
+        train_records, validation_records = stratified_split(
+            records, args.val_fraction, args.seed
+        )
     train_dataset = LabeledImageDataset(train_records, train_transform())
     validation_dataset = LabeledImageDataset(validation_records, eval_transform())
     fake_count = sum(record.label == 1 for record in train_records)
@@ -714,6 +749,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--positive-weight", type=float)
     parser.add_argument("--val-fraction", type=float, default=0.15)
     parser.add_argument(
+        "--validation-dir",
+        help="Local-folder mode only: use this labeled real/fake folder as the exact validation "
+        "set and exclude matching materialized records from training.",
+    )
+    parser.add_argument(
         "--generator-disjoint-split",
         action="store_true",
         help="Local-folder mode only: hold out whole generator/source groups for validation "
@@ -727,6 +767,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Hold out fake generator groups but stratify authentic sources across both splits, "
         "avoiding real-source/content confounding.",
+    )
+    parser.add_argument(
+        "--validation-fake-groups",
+        nargs="+",
+        help="With --fake-generator-disjoint-split, hold out these exact fake groups instead "
+        "of selecting a subset based on size. Keeps data-scale experiments comparable.",
     )
     parser.add_argument(
         "--balance-groups",
