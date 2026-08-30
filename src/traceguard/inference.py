@@ -39,7 +39,10 @@ class Predictor:
         self.device = device
         self.threshold = threshold
         self.temperature = max(float(temperature), 1e-6)
-        self.transform = build_eval_transform()
+        # Derived from the model rather than defaulted, so a CLIP-backed checkpoint is preprocessed
+        # with CLIP's normalization and an EfficientNet one with ImageNet's.
+        mean, std = model.normalization()
+        self.transform = build_eval_transform(model.input_size, mean, std)
 
     @classmethod
     def from_checkpoint(cls, checkpoint_path: str | Path, device: str = "auto") -> Predictor:

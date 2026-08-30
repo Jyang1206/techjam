@@ -84,21 +84,42 @@ class RandomRobustnessTransform:
         return apply_degradation(image, name, value, seed=random.randrange(2**32))
 
 
-def build_train_transform(image_size: int = IMAGE_SIZE) -> Callable[[Image.Image], object]:
+def build_train_transform(
+    image_size: int = IMAGE_SIZE,
+    mean: tuple[float, ...] = IMAGENET_MEAN,
+    std: tuple[float, ...] = IMAGENET_STD,
+    degradation_probability: float = 0.8,
+) -> Callable[[Image.Image], object]:
+    """Training pipeline: degrade, crop, flip, normalize.
+
+    `mean`/`std` must match what the chosen backbone's pretrained weights expect - pass
+    `TraceGuard.normalization()` rather than assuming ImageNet constants, since CLIP backbones use
+    their own. `degradation_probability` is the share of training images that get a random
+    real-world degradation applied; the NTIRE 2026 robustness challenge found that training through
+    these transforms mattered more than any post-hoc robustification.
+    """
     from torchvision import transforms
 
     return transforms.Compose(
         [
-            RandomRobustnessTransform(),
+            RandomRobustnessTransform(degradation_probability),
             transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0)),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
-            transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+            transforms.Normalize(mean, std),
         ]
     )
 
 
-def build_eval_transform(image_size: int = IMAGE_SIZE) -> Callable[[Image.Image], object]:
+def build_eval_transform(
+    image_size: int = IMAGE_SIZE,
+    mean: tuple[float, ...] = IMAGENET_MEAN,
+    std: tuple[float, ...] = IMAGENET_STD,
+) -> Callable[[Image.Image], object]:
+    """Deterministic pipeline used for validation, evaluation, and inference.
+
+    See build_train_transform for why `mean`/`std` should come from the model rather than defaults.
+    """
     from torchvision import transforms
 
     resize_size = round(image_size / 0.875)
@@ -107,6 +128,6 @@ def build_eval_transform(image_size: int = IMAGE_SIZE) -> Callable[[Image.Image]
             transforms.Resize(resize_size),
             transforms.CenterCrop(image_size),
             transforms.ToTensor(),
-            transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+            transforms.Normalize(mean, std),
         ]
     )

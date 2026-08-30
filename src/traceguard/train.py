@@ -23,7 +23,7 @@ from .data import (
 )
 from .inference import resolve_device
 from .metrics import binary_metrics
-from .model import ModelConfig, TraceGuard, trainable_parameters
+from .model import ModelConfig, TraceGuard, frozen_parameters, trainable_parameters
 from .transforms import build_eval_transform, build_train_transform
 
 
@@ -66,7 +66,12 @@ def _sample_limit(value: int) -> int | None:
     return value if value > 0 else None
 
 
-def build_training_datasets(args: argparse.Namespace):
+def build_training_datasets(args: argparse.Namespace, train_transform, eval_transform):
+    """Assemble train/validation datasets from whichever single source was selected.
+
+    The transforms are passed in rather than built here because they depend on the model's
+    backbone (input size and normalization constants), so the model has to exist first.
+    """
     selected_sources = sum(
         bool(source)
         for source in (args.data_dir, args.hf_dataset, args.kaggle_dataset, args.wildfake_root)
@@ -85,14 +90,14 @@ def build_training_datasets(args: argparse.Namespace):
         }
         train_dataset = HuggingFaceStreamDataset(
             split=args.hf_train_split,
-            transform=build_train_transform(),
+            transform=train_transform,
             max_samples=_sample_limit(args.max_train_samples),
             shuffle_buffer=args.hf_shuffle_buffer,
             **common,
         )
         validation_dataset = HuggingFaceStreamDataset(
             split=args.hf_validation_split,
-            transform=build_eval_transform(),
+            transform=eval_transform,
             max_samples=_sample_limit(args.max_validation_samples),
             **common,
         )
@@ -125,8 +130,8 @@ def build_training_datasets(args: argparse.Namespace):
             _sample_limit(args.max_validation_samples),
             args.seed,
         )
-        train_dataset = LabeledImageDataset(train_records, build_train_transform())
-        validation_dataset = LabeledImageDataset(validation_records, build_eval_transform())
+        train_dataset = LabeledImageDataset(train_records, train_transform)
+        validation_dataset = LabeledImageDataset(validation_records, eval_transform)
         positive_weight = args.positive_weight if args.positive_weight is not None else 1.0
         source_name = f"Kaggle {args.kaggle_dataset}"
         return (
@@ -170,8 +175,8 @@ def build_training_datasets(args: argparse.Namespace):
             else negative_count / max(positive_count, 1)
         )
         return (
-            LabeledImageDataset(train_records, build_train_transform()),
-            LabeledImageDataset(validation_records, build_eval_transform()),
+            LabeledImageDataset(train_records, train_transform),
+            LabeledImageDataset(validation_records, eval_transform),
             len(train_records),
             len(validation_records),
             positive_weight,
@@ -181,8 +186,8 @@ def build_training_datasets(args: argparse.Namespace):
     records = discover_labeled_images(args.data_dir)
     split_fn = group_disjoint_split if args.generator_disjoint_split else stratified_split
     train_records, validation_records = split_fn(records, args.val_fraction, args.seed)
-    train_dataset = LabeledImageDataset(train_records, build_train_transform())
-    validation_dataset = LabeledImageDataset(validation_records, build_eval_transform())
+    train_dataset = LabeledImageDataset(train_records, train_transform)
+    validation_dataset = LabeledImageDataset(validation_records, eval_transform)
     fake_count = sum(record.label == 1 for record in train_records)
     real_count = len(train_records) - fake_count
     positive_weight = (
@@ -216,6 +221,20 @@ def train(args: argparse.Namespace) -> Path:
 
     seed_everything(args.seed)
     device = resolve_device(args.device)
+
+    config = ModelConfig(
+        backbone=args.backbone,
+        pretrained=not args.no_pretrained,
+        freeze_backbone=args.freeze_backbone,
+        use_frequency=not args.no_frequency,
+    )
+    model = TraceGuard(config).to(device)
+    mean, std = model.normalization()
+    train_transform = build_train_transform(
+        model.input_size, mean, std, args.degradation_probability
+    )
+    eval_transform = build_eval_transform(model.input_size, mean, std)
+
     (
         train_dataset,
         validation_dataset,
@@ -223,7 +242,7 @@ def train(args: argparse.Namespace) -> Path:
         validation_count,
         positive_weight,
         source_name,
-    ) = build_training_datasets(args)
+    ) = build_training_datasets(args, train_transform, eval_transform)
     loader_options = {
         "batch_size": args.batch_size,
         "num_workers": args.workers,
@@ -237,11 +256,15 @@ def train(args: argparse.Namespace) -> Path:
     )
     validation_loader = DataLoader(validation_dataset, shuffle=False, **loader_options)
 
-    config = ModelConfig(backbone=args.backbone, pretrained=not args.no_pretrained)
-    model = TraceGuard(config).to(device)
     pos_weight = torch.tensor([positive_weight], device=device)
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    # Only hand the optimizer parameters it is allowed to move; with a frozen backbone that is just
+    # the fusion head.
+    optimizer = torch.optim.AdamW(
+        [parameter for parameter in model.parameters() if parameter.requires_grad],
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+    )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
 
@@ -250,7 +273,13 @@ def train(args: argparse.Namespace) -> Path:
     best_auc = -1.0
     history: list[dict[str, float | int]] = []
     print(
-        f"Training {trainable_parameters(model):,} parameters on {device}; "
+        f"Backbone {config.backbone} "
+        f"({'frozen' if config.freeze_backbone else 'fine-tuned'}), "
+        f"frequency branch {'on' if config.use_frequency else 'off'}."
+    )
+    print(
+        f"Training {trainable_parameters(model):,} of "
+        f"{trainable_parameters(model) + frozen_parameters(model):,} parameters on {device}; "
         f"{train_count} train / {validation_count} validation images from {source_name}."
     )
 
@@ -359,7 +388,33 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow replacing an existing best.pt/history.json already in --output-dir",
     )
-    parser.add_argument("--backbone", default="efficientnet_b0")
+    parser.add_argument(
+        "--backbone",
+        default="efficientnet_b0",
+        help="Any timm model name. Use vit_large_patch14_clip_224.openai with --freeze-backbone "
+        "for the generalization-first recipe; efficientnet_b0 reproduces the original baseline.",
+    )
+    parser.add_argument(
+        "--freeze-backbone",
+        action="store_true",
+        help="Train only the fusion head and leave the pretrained backbone unchanged. Strongly "
+        "recommended with a large pretrained backbone on hackathon-sized data: fine-tuning "
+        "everything lets the backbone memorize the training generators instead of learning "
+        "transferable evidence (Ojha et al., CVPR 2023).",
+    )
+    parser.add_argument(
+        "--no-frequency",
+        action="store_true",
+        help="Disable the radial-FFT branch. Use this to ablate it and measure what it contributes.",
+    )
+    parser.add_argument(
+        "--degradation-probability",
+        type=float,
+        default=0.8,
+        help="Share of training images given a random real-world degradation (JPEG, blur, resize, "
+        "noise, color, crop). 1.0 degrades every image, which top NTIRE 2026 entries used as a "
+        "strong regularizer.",
+    )
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--workers", type=int, default=4)
