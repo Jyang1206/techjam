@@ -1,0 +1,15 @@
+[
+  {
+    "condition": "clean",
+    "samples": 20000,
+    "accuracy": 0.49325,
+    "balanced_accuracy": 0.49325,
+    "precision": 0.49657447348388734,
+    "recall": 0.9785,
+    "f1": 0.6588116478707288,
+    "roc_auc": 0.309832655,
+    "brier": 0.468968617611861,
+    "false_positive_rate": 0.992,
+    "false_negative_rate": 0.0215
+  }
+]

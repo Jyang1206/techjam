@@ -173,6 +173,17 @@ views are a useful robustness/compute compromise. Caching is intentionally rejec
 `--freeze-backbone` and `--no-frequency-branch` are set, because otherwise cached tensors would
 silently prevent trainable backbone/frequency parameters from receiving gradients.
 
+For a single-pass detector that must tolerate downsampling, add `--robustness-profile
+low_resolution`. It applies the same label-symmetric 32/56/112-pixel resize and optional JPEG
+pipeline to authentic and fake training images; use multiple cached views so one random severity
+does not define an image permanently. `standard` remains the default and `none` is available for
+controlled ablations.
+
+`--low-resolution-size 32` adds a zero-initialized residual expert that reuses the same backbone on
+a 32-pixel downsampled view. With `--init-checkpoint ... --freeze-base-classifier`, epoch 0 exactly
+reproduces the initializer and only the new residual vector trains. This doubles encoder inference,
+so compare it against augmentation-only training before promoting it.
+
 To adapt an existing detector, pass `--init-checkpoint <best.pt> --evaluate-initial`. The complete
 architecture and weights come from that checkpoint; epoch 0 is evaluated and saved before any
 optimizer step. Fine-tuning therefore replaces `best.pt` only if validation ROC-AUC genuinely

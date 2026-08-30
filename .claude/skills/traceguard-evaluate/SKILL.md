@@ -37,6 +37,10 @@ subset instead of the full suite — useful for a quick check. Default is `all`.
 Use `--transforms clean` for a one-condition screening run before spending time on the full suite,
 especially with a large ViT encoder.
 
+Use `--max-samples N --seed 42` for a deterministic label-balanced development screen. A subset is
+appropriate for rejecting an obviously weak experiment, but rerun promoted checkpoints on the full
+set before adding them to the comparison table.
+
 Scoring is batched (`--batch-size`, default 64) — images are grouped into batches and scored with
 one model forward pass per batch rather than one call per image, which matters a lot on GPU/MPS
 where per-call overhead dominates at batch size 1. A progress line prints periodically within each

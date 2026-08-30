@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from .data import discover_labeled_images
+from .data import discover_labeled_images, limit_records
 from .inference import Predictor
 from .metrics import binary_metrics
 from .transforms import ROBUSTNESS_SUITE, apply_degradation
@@ -58,6 +58,7 @@ def _relative_image_path(path: Path, data_dir: str | Path) -> str:
 
 def evaluate(args: argparse.Namespace) -> list[dict[str, object]]:
     records = discover_labeled_images(args.data_dir)
+    records = limit_records(records, args.max_samples, args.seed)
     predictor = Predictor.from_checkpoint(args.checkpoint, device=args.device)
     conditions = [("clean", 1.0)]
     selected = (
@@ -161,6 +162,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--device", default="auto")
     parser.add_argument("--error-examples", type=int, default=12)
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        help="Evaluate a deterministic label-balanced subset; omit to use every image.",
+    )
+    parser.add_argument("--seed", type=int, default=42, help="Subset-selection seed.")
     parser.add_argument(
         "--save-clean-predictions",
         action="store_true",

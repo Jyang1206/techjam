@@ -90,6 +90,24 @@ class RandomRobustnessTransform:
         return apply_degradation(image, name, value, seed=random.randrange(2**32))
 
 
+class RandomLowResolutionTransform:
+    """Expose both labels to realistic low-resolution and recompression artifacts."""
+
+    def __init__(self, probability: float = 0.8) -> None:
+        self.probability = probability
+
+    def __call__(self, image: Image.Image) -> Image.Image:
+        image = ensure_rgb(image)
+        if random.random() > self.probability:
+            return image
+        target_size = random.choice((32, 56, 112))
+        scale = min(1.0, target_size / max(min(image.size), 1))
+        image = apply_degradation(image, "resize", scale)
+        if random.random() < 0.5:
+            image = apply_degradation(image, "jpeg", random.choice((50, 70, 90)))
+        return image
+
+
 def normalization_for_backbone(backbone: str) -> str:
     """Choose the native normalization used by the requested pretrained visual encoder."""
     return "clip" if "clip" in backbone.casefold() or "mclip" in backbone.casefold() else "imagenet"
@@ -106,6 +124,7 @@ def build_train_transform(
     image_size: int = IMAGE_SIZE,
     *,
     normalization: str = "imagenet",
+    robustness_profile: str = "standard",
 ) -> Callable[[Image.Image], object]:
     from torchvision import transforms
     from torchvision.transforms import InterpolationMode
@@ -114,9 +133,17 @@ def build_train_transform(
     interpolation = (
         InterpolationMode.BICUBIC if normalization == "clip" else InterpolationMode.BILINEAR
     )
+    if robustness_profile == "standard":
+        robustness_transform = RandomRobustnessTransform()
+    elif robustness_profile == "low_resolution":
+        robustness_transform = RandomLowResolutionTransform()
+    elif robustness_profile == "none":
+        robustness_transform = ensure_rgb
+    else:
+        raise ValueError(f"Unknown training robustness profile: {robustness_profile}")
     return transforms.Compose(
         [
-            RandomRobustnessTransform(),
+            robustness_transform,
             transforms.RandomResizedCrop(
                 image_size, scale=(0.75, 1.0), interpolation=interpolation
             ),

@@ -46,6 +46,25 @@ def test_classifying_extracted_features_matches_forward_pass():
     assert torch.equal(direct, cached)
 
 
+def test_zero_initialized_low_resolution_expert_preserves_base_prediction():
+    base = TraceGuard(ModelConfig(pretrained=False, use_frequency=False)).eval()
+    multiscale = TraceGuard(
+        ModelConfig(pretrained=False, use_frequency=False, low_resolution_size=32)
+    ).eval()
+    load_result = multiscale.load_state_dict(base.state_dict(), strict=False)
+    images = torch.rand(2, 3, 224, 224)
+
+    with torch.inference_mode():
+        base_output = base(images)
+        multiscale_output = multiscale(images)
+
+    assert all(key.startswith("low_resolution_classifier.") for key in load_result.missing_keys)
+    assert not load_result.unexpected_keys
+    assert torch.equal(base_output, multiscale_output)
+    assert multiscale.classifier[-1].in_features == multiscale.backbone_dim
+    assert multiscale.low_resolution_classifier[-1].in_features == multiscale.backbone_dim
+
+
 def test_balanced_group_weights_equalize_group_and_label_mass():
     records = [
         ImageRecord(Path(f"real_a_{index}.jpg"), 0, "real_a") for index in range(4)

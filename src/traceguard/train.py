@@ -134,7 +134,10 @@ def balanced_group_weights(records) -> list[float]:
 
 def build_training_datasets(args: argparse.Namespace, model_config: ModelConfig | None = None):
     normalization = (model_config or ModelConfig()).normalization
-    train_transform = lambda: build_train_transform(normalization=normalization)
+    train_transform = lambda: build_train_transform(
+        normalization=normalization,
+        robustness_profile=args.robustness_profile,
+    )
     eval_crop_pct = (model_config or ModelConfig()).eval_crop_pct
     eval_transform = lambda: build_eval_transform(
         normalization=normalization, crop_pct=eval_crop_pct
@@ -298,8 +301,23 @@ def train(args: argparse.Namespace) -> Path:
     initial_checkpoint = None
     if args.init_checkpoint:
         initial_checkpoint = torch.load(args.init_checkpoint, map_location="cpu", weights_only=True)
-        config = replace(
+        initial_config = replace(
             ModelConfig(**initial_checkpoint.get("model_config", {})), pretrained=False
+        )
+        if (
+            args.low_resolution_size is not None
+            and initial_config.low_resolution_size not in (0, args.low_resolution_size)
+        ):
+            raise ValueError(
+                "Cannot change the low-resolution size of an existing multi-scale checkpoint"
+            )
+        config = replace(
+            initial_config,
+            low_resolution_size=(
+                args.low_resolution_size
+                if args.low_resolution_size is not None
+                else initial_config.low_resolution_size
+            ),
         )
     else:
         normalization = (
@@ -316,7 +334,10 @@ def train(args: argparse.Namespace) -> Path:
             backbone_projection=args.use_backbone_projection,
             classifier_layernorm=not args.no_classifier_layernorm,
             eval_crop_pct=1.0 if args.use_backbone_projection else 0.875,
+            low_resolution_size=args.low_resolution_size or 0,
         )
+    if config.low_resolution_size < 0 or config.low_resolution_size >= 224:
+        raise ValueError("--low-resolution-size must be between 1 and 223, or 0 to disable")
     (
         train_dataset,
         validation_dataset,
@@ -351,9 +372,31 @@ def train(args: argparse.Namespace) -> Path:
 
     model = TraceGuard(config).to(device)
     if initial_checkpoint is not None:
-        model.load_state_dict(initial_checkpoint["model_state"])
+        load_result = model.load_state_dict(initial_checkpoint["model_state"], strict=False)
+        expected_missing = (
+            {
+                key
+                for key in model.state_dict()
+                if key.startswith("low_resolution_classifier.")
+            }
+            if config.low_resolution_size > initial_config.low_resolution_size
+            else set()
+        )
+        if set(load_result.missing_keys) != expected_missing or load_result.unexpected_keys:
+            raise RuntimeError(
+                "Initializer is not architecture-compatible: "
+                f"missing={load_result.missing_keys}, unexpected={load_result.unexpected_keys}"
+            )
     if args.freeze_backbone:
         model.backbone.requires_grad_(False)
+    if args.freeze_base_classifier:
+        if model.low_resolution_classifier is None or initial_checkpoint is None:
+            raise ValueError(
+                "--freeze-base-classifier requires --init-checkpoint and --low-resolution-size"
+            )
+        model.classifier.requires_grad_(False)
+        if model.frequency_head is not None:
+            model.frequency_head.requires_grad_(False)
     using_cached_features = args.cache_frozen_features
     if using_cached_features:
         if args.feature_cache_views < 1 or args.head_batch_size < 1:
@@ -427,6 +470,9 @@ def train(args: argparse.Namespace) -> Path:
                     "early_stopping_patience": args.early_stopping_patience,
                     "cache_frozen_features": args.cache_frozen_features,
                     "feature_cache_views": args.feature_cache_views,
+                    "freeze_base_classifier": args.freeze_base_classifier,
+                    "low_resolution_size": config.low_resolution_size,
+                    "robustness_profile": args.robustness_profile,
                 },
             },
             best_path,
@@ -501,6 +547,9 @@ def train(args: argparse.Namespace) -> Path:
                         "early_stopping_patience": args.early_stopping_patience,
                         "cache_frozen_features": args.cache_frozen_features,
                         "feature_cache_views": args.feature_cache_views,
+                        "freeze_base_classifier": args.freeze_base_classifier,
+                        "low_resolution_size": config.low_resolution_size,
+                        "robustness_profile": args.robustness_profile,
                     },
                 },
                 best_path,
@@ -594,6 +643,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dropout", type=float, default=0.25)
     parser.add_argument(
+        "--robustness-profile",
+        choices=("standard", "low_resolution", "none"),
+        default="standard",
+        help="Training augmentation profile; low_resolution emphasizes label-symmetric "
+        "32/56/112-pixel resize and JPEG artifacts.",
+    )
+    parser.add_argument(
         "--freeze-backbone",
         action="store_true",
         help="Train only the detection head (and frequency branch, if enabled).",
@@ -613,6 +669,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-classifier-layernorm",
         action="store_true",
         help="Use a plain linear detection head, matching UniversalFakeDetect's CLIP probe.",
+    )
+    parser.add_argument(
+        "--low-resolution-size",
+        type=int,
+        default=None,
+        help="Add a shared-backbone residual expert over an image downsampled to this square size; "
+        "32 targets severe low-resolution domain shift.",
+    )
+    parser.add_argument(
+        "--freeze-base-classifier",
+        action="store_true",
+        help="When adding a low-resolution expert to an initializer, preserve its original head "
+        "and train only the new residual classifier.",
     )
     parser.add_argument(
         "--cache-frozen-features",

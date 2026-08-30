@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,7 @@ class ModelConfig:
     backbone_projection: bool = False
     classifier_layernorm: bool = True
     eval_crop_pct: float = 0.875
+    low_resolution_size: int = 0
 
 
 class FrequencyStatistics(nn.Module):
@@ -88,6 +90,7 @@ class TraceGuard(nn.Module):
                 global_pool="avg",
             )
             backbone_dim = self.backbone.num_features
+        self.backbone_dim = backbone_dim
         from .transforms import normalization_stats
 
         if config.use_frequency:
@@ -109,16 +112,52 @@ class TraceGuard(nn.Module):
             classifier_layers.append(nn.LayerNorm(classifier_dim))
         classifier_layers.extend([nn.Dropout(config.dropout), nn.Linear(classifier_dim, 1)])
         self.classifier = nn.Sequential(*classifier_layers)
+        self.base_feature_dim = classifier_dim
+        self.low_resolution_classifier: nn.Sequential | None = None
+        if config.low_resolution_size > 0:
+            low_resolution_layers: list[nn.Module] = []
+            if config.classifier_layernorm:
+                low_resolution_layers.append(nn.LayerNorm(backbone_dim))
+            low_resolution_layers.extend(
+                [nn.Dropout(config.dropout), nn.Linear(backbone_dim, 1, bias=False)]
+            )
+            self.low_resolution_classifier = nn.Sequential(*low_resolution_layers)
+            nn.init.zeros_(self.low_resolution_classifier[-1].weight)
 
     def extract_features(self, images: torch.Tensor) -> torch.Tensor:
         spatial = self.backbone(images)
+        low_resolution = None
+        if self.low_resolution_classifier is not None:
+            low_size = self.config.low_resolution_size
+            reduced = F.interpolate(
+                images,
+                size=(low_size, low_size),
+                mode="bilinear",
+                align_corners=False,
+                antialias=True,
+            )
+            restored = F.interpolate(
+                reduced,
+                size=images.shape[-2:],
+                mode="bicubic",
+                align_corners=False,
+                antialias=True,
+            )
+            low_resolution = self.backbone(restored)
         if self.frequency is not None and self.frequency_head is not None:
             frequency = self.frequency_head(self.frequency(images))
             spatial = torch.cat([spatial, frequency], dim=1)
+        if low_resolution is not None:
+            spatial = torch.cat([spatial, low_resolution], dim=1)
         return spatial
 
     def classify_features(self, features: torch.Tensor) -> torch.Tensor:
-        return self.classifier(features).squeeze(1)
+        base_features = features[:, : self.base_feature_dim]
+        logits = self.classifier(base_features).squeeze(1)
+        if self.low_resolution_classifier is not None:
+            low_resolution_features = features[:, self.base_feature_dim :]
+            logits = logits + self.low_resolution_classifier(low_resolution_features).squeeze(1)
+        return logits
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         return self.classify_features(self.extract_features(images))

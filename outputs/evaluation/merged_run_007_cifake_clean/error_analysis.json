@@ -1,0 +1,126 @@
+{
+  "false_positives": [
+    {
+      "image_path": "REAL/0857 (9).jpg",
+      "label": 0,
+      "pred": 0.9999892711639404
+    },
+    {
+      "image_path": "REAL/0975 (7).jpg",
+      "label": 0,
+      "pred": 0.9999696016311646
+    },
+    {
+      "image_path": "REAL/0951 (7).jpg",
+      "label": 0,
+      "pred": 0.9999632835388184
+    },
+    {
+      "image_path": "REAL/0597 (3).jpg",
+      "label": 0,
+      "pred": 0.9999552965164185
+    },
+    {
+      "image_path": "REAL/0814 (10).jpg",
+      "label": 0,
+      "pred": 0.9999387264251709
+    },
+    {
+      "image_path": "REAL/0728 (5).jpg",
+      "label": 0,
+      "pred": 0.9999282360076904
+    },
+    {
+      "image_path": "REAL/0311 (7).jpg",
+      "label": 0,
+      "pred": 0.9999171495437622
+    },
+    {
+      "image_path": "REAL/0130.jpg",
+      "label": 0,
+      "pred": 0.9999152421951294
+    },
+    {
+      "image_path": "REAL/0587 (5).jpg",
+      "label": 0,
+      "pred": 0.9999022483825684
+    },
+    {
+      "image_path": "REAL/0035 (9).jpg",
+      "label": 0,
+      "pred": 0.9998962879180908
+    },
+    {
+      "image_path": "REAL/0897 (3).jpg",
+      "label": 0,
+      "pred": 0.9998942613601685
+    },
+    {
+      "image_path": "REAL/0668.jpg",
+      "label": 0,
+      "pred": 0.9998929500579834
+    }
+  ],
+  "false_negatives": [
+    {
+      "image_path": "FAKE/629 (3).jpg",
+      "label": 1,
+      "pred": 0.0003012673696503043
+    },
+    {
+      "image_path": "FAKE/281 (4).jpg",
+      "label": 1,
+      "pred": 0.0005858665099367499
+    },
+    {
+      "image_path": "FAKE/611 (6).jpg",
+      "label": 1,
+      "pred": 0.0007883808575570583
+    },
+    {
+      "image_path": "FAKE/682 (3).jpg",
+      "label": 1,
+      "pred": 0.0012903375318273902
+    },
+    {
+      "image_path": "FAKE/442 (6).jpg",
+      "label": 1,
+      "pred": 0.0015090318629518151
+    },
+    {
+      "image_path": "FAKE/504 (3).jpg",
+      "label": 1,
+      "pred": 0.0027614145074039698
+    },
+    {
+      "image_path": "FAKE/722 (6).jpg",
+      "label": 1,
+      "pred": 0.0028697485104203224
+    },
+    {
+      "image_path": "FAKE/398 (6).jpg",
+      "label": 1,
+      "pred": 0.003026254940778017
+    },
+    {
+      "image_path": "FAKE/55 (4).jpg",
+      "label": 1,
+      "pred": 0.003293260931968689
+    },
+    {
+      "image_path": "FAKE/539 (3).jpg",
+      "label": 1,
+      "pred": 0.0032973582856357098
+    },
+    {
+      "image_path": "FAKE/971 (4).jpg",
+      "label": 1,
+      "pred": 0.003384597133845091
+    },
+    {
+      "image_path": "FAKE/10 (3).jpg",
+      "label": 1,
+      "pred": 0.00418664887547493
+    }
+  ]
+}

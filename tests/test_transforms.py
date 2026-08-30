@@ -9,6 +9,7 @@ from traceguard.transforms import (
     ROBUSTNESS_SUITE,
     apply_degradation,
     build_eval_transform,
+    build_train_transform,
     normalization_for_backbone,
 )
 
@@ -52,3 +53,13 @@ def test_clip_eval_can_preserve_native_crop_percentage():
     transform = build_eval_transform(normalization="clip", crop_pct=1.0)
     resized = transform.transforms[0]
     assert resized.size == 224
+
+
+def test_low_resolution_training_profile_is_selectable():
+    transform = build_train_transform(robustness_profile="low_resolution")
+    assert transform.transforms[0].__class__.__name__ == "RandomLowResolutionTransform"
+
+
+def test_unknown_training_profile_fails_loudly():
+    with pytest.raises(ValueError, match="Unknown training robustness profile"):
+        build_train_transform(robustness_profile="mystery")
