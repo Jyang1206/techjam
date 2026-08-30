@@ -1,0 +1,126 @@
+{
+  "false_positives": [
+    {
+      "image_path": "real/wildfake__Real__celebahq__5b9fcf9c383b__img018021.jpg",
+      "label": 0,
+      "pred": 0.9888448119163513
+    },
+    {
+      "image_path": "real/wildfake__Real__imagenet__58baed55edb0__img091551.jpg",
+      "label": 0,
+      "pred": 0.9344057440757751
+    },
+    {
+      "image_path": "real/wildfake__Real__imagenet__91f673998dc7__img076621.jpg",
+      "label": 0,
+      "pred": 0.8702720403671265
+    },
+    {
+      "image_path": "real/wildfake__Real__imagenet__06912d144586__img058457.jpg",
+      "label": 0,
+      "pred": 0.8575835824012756
+    },
+    {
+      "image_path": "real/hf__SID_Set__0b3bab6629fd2a7a.jpg",
+      "label": 0,
+      "pred": 0.8566062450408936
+    },
+    {
+      "image_path": "real/wildfake__Real__imagenet__72233f1a4455__img079558.jpg",
+      "label": 0,
+      "pred": 0.835320770740509
+    },
+    {
+      "image_path": "real/wildfake__Real__celebahq__083b8f6ad0ee__img005551.jpg",
+      "label": 0,
+      "pred": 0.8239408135414124
+    },
+    {
+      "image_path": "real/wildfake__Real__imagenet__acd4586f3249__img031241.jpg",
+      "label": 0,
+      "pred": 0.807816743850708
+    },
+    {
+      "image_path": "real/wildfake__Real__celebahq__006488230045__img021431.jpg",
+      "label": 0,
+      "pred": 0.7294775247573853
+    },
+    {
+      "image_path": "real/wildfake__Real__imagenet__d4aa1f29f45d__img025482.jpg",
+      "label": 0,
+      "pred": 0.7247467041015625
+    },
+    {
+      "image_path": "real/wildfake__Real__celebahq__64634fd6ec6b__img015937.jpg",
+      "label": 0,
+      "pred": 0.7184546589851379
+    },
+    {
+      "image_path": "real/wildfake__Real__celebahq__cdc7dbf5189e__img025052.jpg",
+      "label": 0,
+      "pred": 0.709372341632843
+    }
+  ],
+  "false_negatives": [
+    {
+      "image_path": "fake/wildfake__Other_based__MAGE__57399fe06298__16526.png",
+      "label": 1,
+      "pred": 3.995571387349628e-05
+    },
+    {
+      "image_path": "fake/wildfake__Other_based__MAGE__d145b67c82e7__31966.png",
+      "label": 1,
+      "pred": 5.615604095510207e-05
+    },
+    {
+      "image_path": "fake/wildfake__Other_based__MAGE__f5d0ac020b6b__48869.png",
+      "label": 1,
+      "pred": 0.00018272132729180157
+    },
+    {
+      "image_path": "fake/wildfake__Other_based__MAGE__9c0ca900c0be__03987.png",
+      "label": 1,
+      "pred": 0.00028063979698345065
+    },
+    {
+      "image_path": "fake/wildfake__Other_based__VQVAE__e52bdc34b9df__img006904.jpg",
+      "label": 1,
+      "pred": 0.0002906896988861263
+    },
+    {
+      "image_path": "fake/wildfake__Other_based__VQVAE__378facc4be92__img045524.jpg",
+      "label": 1,
+      "pred": 0.0002991106011904776
+    },
+    {
+      "image_path": "fake/wildfake__Other_based__MAGE__b2477844b477__00277.png",
+      "label": 1,
+      "pred": 0.0003269571752753109
+    },
+    {
+      "image_path": "fake/wildfake__Other_based__VQVAE__23a73b989847__img024342.jpg",
+      "label": 1,
+      "pred": 0.00038314476842060685
+    },
+    {
+      "image_path": "fake/wildfake__Other_based__VQVAE__e82ec40c8d5f__img007523.jpg",
+      "label": 1,
+      "pred": 0.00044780629104934633
+    },
+    {
+      "image_path": "fake/wildfake__Other_based__VQVAE__5d4093bb4a00__img006296.jpg",
+      "label": 1,
+      "pred": 0.000452137814136222
+    },
+    {
+      "image_path": "fake/wildfake__Other_based__MAGE__36a243448467__32951.png",
+      "label": 1,
+      "pred": 0.0004801327013410628
+    },
+    {
+      "image_path": "fake/wildfake__Other_based__MAGE__c13b0665351e__32924.png",
+      "label": 1,
+      "pred": 0.0005084408912807703
+    }
+  ]
+}

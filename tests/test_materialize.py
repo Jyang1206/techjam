@@ -79,3 +79,38 @@ def test_materialize_wildfake_preserves_duplicate_basenames(tmp_path):
     assert len(real_names) == 2
     assert len(fake_names) == 2
     assert all(name.endswith("__shared.jpg") for name in real_names | fake_names)
+
+
+def test_materialize_wildfake_can_filter_exact_groups(tmp_path):
+    images = tmp_path / "Images"
+    rows = [
+        ["Real", "imagenet", "x", "x", 0, 0, "./Real/imagenet/real.jpg", 1],
+        ["Diffusion_based", "DDIM", "x", "x", 0, 1, "./Diffusion_based/DDIM/a.jpg", 2],
+        ["Diffusion_based", "DDPM", "x", "x", 0, 1, "./Diffusion_based/DDPM/b.jpg", 3],
+    ]
+    for row in rows:
+        create_image(images / row[6].removeprefix("./"))
+    manifest = tmp_path / "train_metadata.csv"
+    with manifest.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            ["Generator", "Architecture", "Weight", "Category", "IsAdvanced", "IsFake",
+             "Image_path", "Num"]
+        )
+        writer.writerows(rows)
+
+    output_root = tmp_path / "merged"
+    counts = materialize_wildfake(
+        manifest,
+        images,
+        output_root=output_root,
+        samples_per_class=1,
+        include_groups=frozenset(
+            {"wildfake__Real__imagenet", "wildfake__Diffusion_based__DDPM"}
+        ),
+    )
+
+    assert counts == (1, 1)
+    assert next((output_root / "fake").iterdir()).name.startswith(
+        "wildfake__Diffusion_based__DDPM__"
+    )

@@ -27,6 +27,16 @@ traceguard-materialize --wildfake-manifest data/WildFake/split_train_test/csv_fi
   --wildfake-samples-per-class 5000 --output-dir data/merged
 ```
 
+When an Images root contains several downloaded generators but an experiment needs one exact new
+family, pass `--wildfake-include-groups` with exact manifest-derived keys. Include at least one real
+and one fake group because materialization is balanced, for example:
+
+```bash
+traceguard-materialize --wildfake-manifest ... --wildfake-images-root data/WildFake/Images \
+  --wildfake-include-groups wildfake__Real__imagenet wildfake__Diffusion_based__DDPM \
+  --wildfake-samples-per-class 5000 --output-dir data/merged_v3
+```
+
 Run it once per source, pointing every call at the **same `--output-dir`** — each call only adds
 its own images, it never touches or clears what a previous call wrote. Once both have run, train
 on the combined folder like any local dataset:

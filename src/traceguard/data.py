@@ -167,6 +167,7 @@ def wildfake_records_from_manifest(
     maximum: int,
     seed: int,
     exclude_protected: bool = True,
+    include_groups: frozenset[str] | None = None,
 ) -> list[ImageRecord]:
     """Build a balanced reservoir sample from an official WildFake split manifest."""
     if maximum < 2:
@@ -190,6 +191,9 @@ def wildfake_records_from_manifest(
         for row in reader:
             if exclude_protected and _wildfake_protected_row(row):
                 continue
+            group = _wildfake_group(row)
+            if include_groups is not None and group not in include_groups:
+                continue
             label = int(float(row["IsFake"]))
             if label not in (0, 1):
                 continue
@@ -197,7 +201,7 @@ def wildfake_records_from_manifest(
             if not image_path.is_file():
                 continue
             seen[label] += 1
-            record = ImageRecord(image_path, label, _wildfake_group(row))
+            record = ImageRecord(image_path, label, group)
             reservoir = reservoirs[label]
             if len(reservoir) < targets[label]:
                 reservoir.append(record)
@@ -235,6 +239,48 @@ def stratified_split(
     return train, validation
 
 
+def _split_label_by_group(
+    label_records: Sequence[ImageRecord],
+    validation_fraction: float,
+    generator: random.Random,
+) -> tuple[list[ImageRecord], list[ImageRecord]]:
+    by_group: dict[str, list[ImageRecord]] = {}
+    for record in label_records:
+        key = record.group or infer_group(record.path)
+        by_group.setdefault(key, []).append(record)
+    if len(by_group) < 2:
+        label = label_records[0].label if label_records else "unknown"
+        raise ValueError(
+            f"Only {len(by_group)} distinct group(s) found for label {label} - a "
+            "group-disjoint split needs at least 2 to hold one out. Use stratified_split "
+            "instead if your data has no recoverable generator/source identity."
+        )
+    group_keys = list(by_group)
+    generator.shuffle(group_keys)
+    target = round(len(label_records) * validation_fraction)
+    # Find the group subset whose sample count is closest to the requested fraction. The old
+    # shuffled-greedy selection could overshoot badly when several small groups happened to
+    # precede a large one, moving almost every minority generator into validation and leaving
+    # training dominated by one source. Dynamic programming is cheap here (bounded by the
+    # number of samples for this label) and preserves the seed as a deterministic tie-breaker.
+    candidates: dict[int, tuple[str, ...]] = {0: ()}
+    for key in group_keys:
+        size = len(by_group[key])
+        for count, keys in list(candidates.items()):
+            candidates.setdefault(count + size, (*keys, key))
+    valid_counts = [count for count in candidates if 0 < count < len(label_records)]
+    best_count = min(
+        valid_counts,
+        key=lambda count: (abs(count - target), count > target),
+    )
+    validation_keys = set(candidates[best_count])
+    train: list[ImageRecord] = []
+    validation: list[ImageRecord] = []
+    for key, items in by_group.items():
+        (validation if key in validation_keys else train).extend(items)
+    return train, validation
+
+
 def group_disjoint_split(
     records: Sequence[ImageRecord], validation_fraction: float, seed: int
 ) -> tuple[list[ImageRecord], list[ImageRecord]]:
@@ -260,28 +306,45 @@ def group_disjoint_split(
     validation: list[ImageRecord] = []
     for label in (0, 1):
         label_records = [record for record in records if record.label == label]
-        by_group: dict[str, list[ImageRecord]] = {}
-        for record in label_records:
-            key = record.group or infer_group(record.path)
-            by_group.setdefault(key, []).append(record)
-        if len(by_group) < 2:
-            raise ValueError(
-                f"Only {len(by_group)} distinct group(s) found for label {label} - a "
-                "group-disjoint split needs at least 2 to hold one out. Use stratified_split "
-                "instead if your data has no recoverable generator/source identity."
-            )
-        group_keys = list(by_group)
-        generator.shuffle(group_keys)
-        target = round(len(label_records) * validation_fraction)
-        validation_keys: set[str] = set()
-        validation_count = 0
-        for key in group_keys:
-            if validation_count >= target:
-                break
-            validation_keys.add(key)
-            validation_count += len(by_group[key])
-        for key, items in by_group.items():
-            (validation if key in validation_keys else train).extend(items)
+        label_train, label_validation = _split_label_by_group(
+            label_records, validation_fraction, generator
+        )
+        train.extend(label_train)
+        validation.extend(label_validation)
+    generator.shuffle(train)
+    generator.shuffle(validation)
+    return train, validation
+
+
+def fake_generator_disjoint_split(
+    records: Sequence[ImageRecord], validation_fraction: float, seed: int
+) -> tuple[list[ImageRecord], list[ImageRecord]]:
+    """Hold out fake-generator groups while keeping authentic source domains on both sides.
+
+    Authentic images do not have a generator to generalize across. Holding out their entire source
+    group can make source/content semantics perfectly correlated with the target (for example,
+    CelebA-HQ faces as every validation real versus ImageNet-like generated objects as every fake).
+    This split keeps images disjoint, stratifies authentic records randomly, and applies the full
+    group-disjoint rule only to fake generators.
+    """
+    if not 0 < validation_fraction < 1:
+        raise ValueError("validation_fraction must be between 0 and 1")
+    real_records = [record for record in records if record.label == 0]
+    fake_records = [record for record in records if record.label == 1]
+    if not real_records or not fake_records:
+        raise ValueError("Both real and fake records are required")
+
+    generator = random.Random(seed)
+    generator.shuffle(real_records)
+    real_validation_count = max(1, round(len(real_records) * validation_fraction))
+    real_validation = real_records[:real_validation_count]
+    real_train = real_records[real_validation_count:]
+
+    fake_train, fake_validation = _split_label_by_group(
+        fake_records, validation_fraction, random.Random(seed + 1)
+    )
+    train = [*real_train, *fake_train]
+    validation = [*real_validation, *fake_validation]
     generator.shuffle(train)
     generator.shuffle(validation)
     return train, validation

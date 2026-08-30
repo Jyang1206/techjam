@@ -4,7 +4,13 @@ import pytest
 pytest.importorskip("PIL")
 from PIL import Image
 
-from traceguard.transforms import ROBUSTNESS_SUITE, apply_degradation
+from traceguard.transforms import (
+    CLIP_MEAN,
+    ROBUSTNESS_SUITE,
+    apply_degradation,
+    build_eval_transform,
+    normalization_for_backbone,
+)
 
 
 @pytest.fixture
@@ -32,3 +38,17 @@ def test_noise_is_deterministic_for_evaluation(image):
 def test_unknown_degradation_fails_loudly(image):
     with pytest.raises(ValueError, match="Unknown transform"):
         apply_degradation(image, "mystery", 1)
+
+
+def test_clip_backbone_uses_clip_normalization():
+    assert normalization_for_backbone("vit_base_patch16_clip_224.openai") == "clip"
+    assert normalization_for_backbone("efficientnet_b0") == "imagenet"
+    normalized = build_eval_transform(normalization="clip")(Image.new("RGB", (256, 256), "white"))
+    expected = [(1 - mean) / std for mean, std in zip(CLIP_MEAN, (0.26862954, 0.26130258, 0.27577711))]
+    assert np.allclose(normalized.mean(dim=(1, 2)).numpy(), expected, atol=1e-5)
+
+
+def test_clip_eval_can_preserve_native_crop_percentage():
+    transform = build_eval_transform(normalization="clip", crop_pct=1.0)
+    resized = transform.transforms[0]
+    assert resized.size == 224

@@ -12,6 +12,7 @@ from traceguard.data import (
     child_directory,
     decode_dataset_image,
     discover_labeled_images,
+    fake_generator_disjoint_split,
     find_split_directory,
     group_disjoint_split,
     image_paths,
@@ -170,6 +171,26 @@ def test_group_disjoint_split_holds_out_whole_groups(tmp_path):
     assert validation  # something actually landed in validation
 
 
+def test_group_disjoint_split_chooses_group_subset_closest_to_target():
+    records = []
+    for label in (0, 1):
+        for group_index, size in enumerate((8, 5, 3, 2)):
+            records.extend(
+                ImageRecord(
+                    Path(f"/{label}/{group_index}_{item}.jpg"),
+                    label,
+                    f"group_{label}_{group_index}",
+                )
+                for item in range(size)
+            )
+
+    _, validation = group_disjoint_split(records, validation_fraction=5 / 18, seed=42)
+
+    # Five images per label is exactly reachable, so the splitter should not greedily overshoot.
+    assert sum(record.label == 0 for record in validation) == 5
+    assert sum(record.label == 1 for record in validation) == 5
+
+
 def test_group_disjoint_split_requires_at_least_two_groups_per_label():
     records = [
         ImageRecord(Path("/fake/a.jpg"), 0, "only_group"),
@@ -177,3 +198,25 @@ def test_group_disjoint_split_requires_at_least_two_groups_per_label():
     ]
     with pytest.raises(ValueError, match="distinct group"):
         group_disjoint_split(records, validation_fraction=0.2, seed=1)
+
+
+def test_fake_generator_split_stratifies_reals_and_holds_out_fake_groups():
+    records = []
+    for source in ("real_faces", "real_objects"):
+        records.extend(ImageRecord(Path(f"/{source}/{i}.jpg"), 0, source) for i in range(20))
+    for generator in ("fake_a", "fake_b", "fake_c"):
+        records.extend(ImageRecord(Path(f"/{generator}/{i}.jpg"), 1, generator) for i in range(10))
+
+    train, validation = fake_generator_disjoint_split(records, 0.25, seed=42)
+
+    train_fake_groups = {record.group for record in train if record.label == 1}
+    validation_fake_groups = {record.group for record in validation if record.label == 1}
+    assert not train_fake_groups & validation_fake_groups
+    assert {record.group for record in train if record.label == 0} == {
+        "real_faces",
+        "real_objects",
+    }
+    assert {record.group for record in validation if record.label == 0} == {
+        "real_faces",
+        "real_objects",
+    }

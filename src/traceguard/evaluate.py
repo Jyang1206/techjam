@@ -63,7 +63,7 @@ def evaluate(args: argparse.Namespace) -> list[dict[str, object]]:
     selected = (
         ROBUSTNESS_SUITE
         if args.transforms == ["all"]
-        else {name: ROBUSTNESS_SUITE[name] for name in args.transforms}
+        else {name: ROBUSTNESS_SUITE[name] for name in args.transforms if name != "clean"}
     )
     conditions.extend((name, value) for name, values in selected.items() for value in values)
     metric_rows: list[dict[str, object]] = []
@@ -131,6 +131,13 @@ def evaluate(args: argparse.Namespace) -> list[dict[str, object]]:
         ),
         encoding="utf-8",
     )
+    if args.save_clean_predictions:
+        with (output_dir / "clean_predictions.csv").open(
+            "w", newline="", encoding="utf-8"
+        ) as handle:
+            writer = csv.DictWriter(handle, fieldnames=("image_path", "label", "pred"))
+            writer.writeheader()
+            writer.writerows(clean_predictions)
     return metric_rows
 
 
@@ -142,7 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--transforms",
         nargs="+",
-        choices=["all", *ROBUSTNESS_SUITE],
+        choices=["all", "clean", *ROBUSTNESS_SUITE],
         default=["all"],
     )
     parser.add_argument("--tta", choices=("none", "robust"), default="robust")
@@ -154,6 +161,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--device", default="auto")
     parser.add_argument("--error-examples", type=int, default=12)
+    parser.add_argument(
+        "--save-clean-predictions",
+        action="store_true",
+        help="Write every clean score for threshold/FPR operating-point analysis.",
+    )
     return parser
 
 

@@ -82,6 +82,7 @@ def materialize_wildfake(
     samples_per_class: int,
     seed: int = 42,
     exclude_protected: bool = True,
+    include_groups: frozenset[str] | None = None,
 ) -> tuple[int, int]:
     """Copy a balanced WildFake sample from its official manifest onto disk as real/fake files."""
     records = wildfake_records_from_manifest(
@@ -90,6 +91,7 @@ def materialize_wildfake(
         maximum=samples_per_class * 2,
         seed=seed,
         exclude_protected=exclude_protected,
+        include_groups=include_groups,
     )
     counts = {0: 0, 1: 0}
     for record in records:
@@ -134,6 +136,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--wildfake-images-root")
     parser.add_argument("--wildfake-samples-per-class", type=int, default=5000)
     parser.add_argument(
+        "--wildfake-include-groups",
+        nargs="+",
+        help="Optional exact group allowlist, e.g. wildfake__Real__imagenet "
+        "wildfake__Diffusion_based__DDPM.",
+    )
+    parser.add_argument(
         "--allow-protected-wildfake",
         action="store_true",
         help="Include COCO real and advanced DALL-E rows; never use for challenge submission",
@@ -169,6 +177,11 @@ def main() -> None:
             samples_per_class=args.wildfake_samples_per_class,
             seed=args.seed,
             exclude_protected=not args.allow_protected_wildfake,
+            include_groups=(
+                frozenset(args.wildfake_include_groups)
+                if args.wildfake_include_groups
+                else None
+            ),
         )
         print(f"WildFake: wrote {real} real / {fake} fake images to {output_root}")
 

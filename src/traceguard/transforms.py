@@ -10,6 +10,12 @@ from PIL import Image, ImageEnhance, ImageFilter
 IMAGE_SIZE = 224
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
+CLIP_MEAN = (0.48145466, 0.4578275, 0.40821073)
+CLIP_STD = (0.26862954, 0.26130258, 0.27577711)
+NORMALIZATION_STATS = {
+    "imagenet": (IMAGENET_MEAN, IMAGENET_STD),
+    "clip": (CLIP_MEAN, CLIP_STD),
+}
 
 ROBUSTNESS_SUITE: dict[str, tuple[float, ...]] = {
     "jpeg": (90, 70, 50, 30),
@@ -84,29 +90,64 @@ class RandomRobustnessTransform:
         return apply_degradation(image, name, value, seed=random.randrange(2**32))
 
 
-def build_train_transform(image_size: int = IMAGE_SIZE) -> Callable[[Image.Image], object]:
-    from torchvision import transforms
+def normalization_for_backbone(backbone: str) -> str:
+    """Choose the native normalization used by the requested pretrained visual encoder."""
+    return "clip" if "clip" in backbone.casefold() or "mclip" in backbone.casefold() else "imagenet"
 
+
+def normalization_stats(name: str) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    try:
+        return NORMALIZATION_STATS[name]
+    except KeyError as exc:
+        raise ValueError(f"Unknown normalization: {name}") from exc
+
+
+def build_train_transform(
+    image_size: int = IMAGE_SIZE,
+    *,
+    normalization: str = "imagenet",
+) -> Callable[[Image.Image], object]:
+    from torchvision import transforms
+    from torchvision.transforms import InterpolationMode
+
+    mean, std = normalization_stats(normalization)
+    interpolation = (
+        InterpolationMode.BICUBIC if normalization == "clip" else InterpolationMode.BILINEAR
+    )
     return transforms.Compose(
         [
             RandomRobustnessTransform(),
-            transforms.RandomResizedCrop(image_size, scale=(0.75, 1.0)),
+            transforms.RandomResizedCrop(
+                image_size, scale=(0.75, 1.0), interpolation=interpolation
+            ),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
-            transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+            transforms.Normalize(mean, std),
         ]
     )
 
 
-def build_eval_transform(image_size: int = IMAGE_SIZE) -> Callable[[Image.Image], object]:
+def build_eval_transform(
+    image_size: int = IMAGE_SIZE,
+    *,
+    normalization: str = "imagenet",
+    crop_pct: float = 0.875,
+) -> Callable[[Image.Image], object]:
     from torchvision import transforms
+    from torchvision.transforms import InterpolationMode
 
-    resize_size = round(image_size / 0.875)
+    mean, std = normalization_stats(normalization)
+    if not 0 < crop_pct <= 1:
+        raise ValueError("crop_pct must be in (0, 1]")
+    resize_size = round(image_size / crop_pct)
+    interpolation = (
+        InterpolationMode.BICUBIC if normalization == "clip" else InterpolationMode.BILINEAR
+    )
     return transforms.Compose(
         [
-            transforms.Resize(resize_size),
+            transforms.Resize(resize_size, interpolation=interpolation),
             transforms.CenterCrop(image_size),
             transforms.ToTensor(),
-            transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+            transforms.Normalize(mean, std),
         ]
     )

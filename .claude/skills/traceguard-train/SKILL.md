@@ -5,8 +5,10 @@ description: Train the TraceGuard AIGC image detector (`traceguard-train` CLI) o
 
 # Train TraceGuard
 
-`traceguard-train` fine-tunes the full two-branch model (EfficientNet-B0 + frequency
-statistics, ~4M params) end-to-end — nothing is frozen. Before anything else, make sure you're in the `techjam` repo root and its virtualenv is active:
+By default, `traceguard-train` fine-tunes the full two-branch model (EfficientNet-B0 + frequency
+statistics, ~4M params) end-to-end. It also supports a low-capacity frozen-CLIP probe for stronger
+cross-generator generalization. Before anything else, make sure you're in the `techjam` repo root
+and its virtualenv is active:
 
 ```bash
 source .venv/bin/activate   # create it first with: python -m venv .venv && pip install -e ".[dev]"
@@ -29,6 +31,13 @@ Example commands:
 ```bash
 # Local folder
 traceguard-train data/train --epochs 12 --batch-size 32 --output-dir checkpoints/local/run_001
+
+# Cross-generator CLIP probe: only LayerNorm + binary head are trained (2,305 params)
+traceguard-train data/merged --generator-disjoint-split \
+  --backbone vit_base_patch16_clip_224.openai \
+  --freeze-backbone --no-frequency-branch --cache-frozen-features \
+  --lr 1e-3 --weight-decay 1e-2 --early-stopping-patience 5 \
+  --output-dir checkpoints/merged/run_002
 
 # SID_Set (streamed)
 traceguard-train --hf-dataset saberzl/SID_Set \
@@ -114,6 +123,11 @@ into the filename (`wildfake__<generator>__<architecture>__...`, `hf__<dataset_s
 `infer_group()` parses it back out when re-discovering images from a plain folder. Plain images with
 no such naming fall into a single "unknown" group.
 
+The splitter searches for the whole-group subset whose image count is closest to the requested
+`--val-fraction`; it does not greedily accumulate shuffled groups. This matters when group sizes are
+uneven, because a greedy split can accidentally place most minority generators in validation and
+leave training dominated by one generator family.
+
 **This needs at least 2 distinct groups per label to mean anything** — it raises a clear error
 otherwise rather than silently falling back to something else. A SID_Set-only merge has exactly one
 group per label (the whole HF dataset has no per-image generator column), so this flag only becomes
@@ -136,6 +150,43 @@ Two things worth knowing about what ends up in that merged folder:
   seen it, evaluating against it afterward is a genuine "does this generalize" check, not just
   another training input.
 
+## Frozen CLIP probe for cross-generator generalization
+
+The original EfficientNet/frequency model can memorize generator-specific high-frequency traces.
+Use `--backbone vit_base_patch16_clip_224.openai --freeze-backbone --no-frequency-branch` to train a
+small classifier over a pretrained CLIP visual representation instead. `--normalization auto`
+(the default) detects CLIP backbones and applies CLIP's native mean/std during both training and
+checkpoint inference; this choice is stored in `model_config`, so older ImageNet-normalized
+checkpoints remain compatible.
+
+`--freeze-backbone` removes the visual encoder from optimization, and `--no-frequency-branch`
+prevents the head from falling back to brittle spectrum shortcuts. For this probe, `--lr 1e-3
+--weight-decay 1e-2 --dropout 0.25` is a reasonable starting point. Use
+`--early-stopping-patience 5` on generator-disjoint validation rather than assuming more epochs are
+better. These settings are an ablation, not a guarantee: only the untouched evaluation result can
+establish whether generalization improved.
+
+For large frozen encoders, add `--cache-frozen-features`. It performs the expensive backbone pass
+once, stores its output in RAM, and then optimizes the head with `--head-batch-size` (default 1024).
+`--feature-cache-views N` caches N independently augmented versions of the training set; three
+views are a useful robustness/compute compromise. Caching is intentionally rejected unless both
+`--freeze-backbone` and `--no-frequency-branch` are set, because otherwise cached tensors would
+silently prevent trainable backbone/frequency parameters from receiving gradients.
+
+To adapt an existing detector, pass `--init-checkpoint <best.pt> --evaluate-initial`. The complete
+architecture and weights come from that checkpoint; epoch 0 is evaluated and saved before any
+optimizer step. Fine-tuning therefore replaces `best.pt` only if validation ROC-AUC genuinely
+improves over the initializer. This is the safe path for adapting the official UniversalFakeDetect
+head without accidentally destroying its broader pretrained generalization.
+
+When authentic source domains are visibly different (for example CelebA-HQ faces versus ImageNet
+objects), prefer `--fake-generator-disjoint-split` over `--generator-disjoint-split`. It keeps fake
+generator families completely disjoint but randomly stratifies authentic images across train and
+validation. This avoids making real-source semantics a proxy for the label while retaining the
+important unseen-generator test. Add `--balance-groups` when generator sizes are uneven; sampling
+then assigns equal total mass to real/fake and equal mass to every source/generator within its
+label, preventing a 5,000-image generator from drowning out a 200-image generator.
+
 ## Things this skill should always flag before running
 
 - **Never pass `--allow-protected-wildfake`** for anything meant for challenge submission. WildFake
@@ -156,9 +207,10 @@ Two things worth knowing about what ends up in that merged folder:
 
 - `<output-dir>/best.pt` — the checkpoint from whichever epoch had the highest validation ROC-AUC,
   including model config, chosen threshold, and that epoch's full metrics.
-- `<output-dir>/history.json` — every epoch's train/validation loss plus accuracy, balanced
-  accuracy, precision, recall, F1, ROC-AUC, Brier score, FPR, FNR. Written once, after the last
-  epoch finishes (not incrementally) — use the `traceguard-status` skill to inspect this afterward.
+- `<output-dir>/history.json` — every completed epoch's train/validation loss plus accuracy,
+  balanced accuracy, precision, recall, F1, ROC-AUC, Brier score, FPR, FNR. Rewritten after each
+  epoch, so completed-epoch progress survives an interrupted longer run. Use the `traceguard-status`
+  skill to inspect it afterward.
 
 Training prints one summary line per epoch to the terminal it was launched from; that live output
 is not captured anywhere else, so check the launching terminal for progress if the run is still

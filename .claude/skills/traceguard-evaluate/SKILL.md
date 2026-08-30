@@ -34,6 +34,8 @@ transform suite —
 
 Use `--transforms jpeg blur` (space-separated, choices are the transform names above) to run only a
 subset instead of the full suite — useful for a quick check. Default is `all`.
+Use `--transforms clean` for a one-condition screening run before spending time on the full suite,
+especially with a large ViT encoder.
 
 Scoring is batched (`--batch-size`, default 64) — images are grouped into batches and scored with
 one model forward pass per batch rather than one call per image, which matters a lot on GPU/MPS
@@ -63,6 +65,8 @@ loader already protects from ever being used in training by default.
 - **`error_analysis.json`** — the top false positives and false negatives from the *clean* condition
   (ranked by confidence), for deliverable #5, "Error Analysis Note." Default 12 examples each side,
   change with `--error-examples N`.
+- **`clean_predictions.csv`** (only with `--save-clean-predictions`) — every clean label/score,
+  used to select deployment operating points such as a threshold capped at 1% false-positive rate.
 
 ## Reading the results
 

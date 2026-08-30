@@ -12,16 +12,27 @@ class ModelConfig:
     pretrained: bool = True
     frequency_bins: int = 8
     dropout: float = 0.25
+    normalization: str = "imagenet"
+    use_frequency: bool = True
+    backbone_projection: bool = False
+    classifier_layernorm: bool = True
+    eval_crop_pct: float = 0.875
 
 
 class FrequencyStatistics(nn.Module):
     """Extract compact radial-spectrum and color statistics from an image batch."""
 
-    def __init__(self, bins: int = 8) -> None:
+    def __init__(
+        self,
+        bins: int = 8,
+        *,
+        mean: tuple[float, ...] = (0.485, 0.456, 0.406),
+        std: tuple[float, ...] = (0.229, 0.224, 0.225),
+    ) -> None:
         super().__init__()
         self.bins = bins
-        self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406])[None, :, None, None])
-        self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225])[None, :, None, None])
+        self.register_buffer("mean", torch.tensor(mean)[None, :, None, None])
+        self.register_buffer("std", torch.tensor(std)[None, :, None, None])
 
     @property
     def output_dim(self) -> int:
@@ -66,30 +77,51 @@ class TraceGuard(nn.Module):
                 "timm is required; install the project with `pip install -e .`"
             ) from exc
 
-        self.backbone = timm.create_model(
-            config.backbone,
-            pretrained=config.pretrained,
-            num_classes=0,
-            global_pool="avg",
-        )
-        backbone_dim = self.backbone.num_features
-        self.frequency = FrequencyStatistics(config.frequency_bins)
-        self.frequency_head = nn.Sequential(
-            nn.LayerNorm(self.frequency.output_dim),
-            nn.Linear(self.frequency.output_dim, 64),
-            nn.GELU(),
-            nn.Dropout(config.dropout),
-        )
-        self.classifier = nn.Sequential(
-            nn.LayerNorm(backbone_dim + 64),
-            nn.Dropout(config.dropout),
-            nn.Linear(backbone_dim + 64, 1),
-        )
+        if config.backbone_projection:
+            self.backbone = timm.create_model(config.backbone, pretrained=config.pretrained)
+            backbone_dim = self.backbone.num_classes
+        else:
+            self.backbone = timm.create_model(
+                config.backbone,
+                pretrained=config.pretrained,
+                num_classes=0,
+                global_pool="avg",
+            )
+            backbone_dim = self.backbone.num_features
+        from .transforms import normalization_stats
+
+        if config.use_frequency:
+            mean, std = normalization_stats(config.normalization)
+            self.frequency = FrequencyStatistics(config.frequency_bins, mean=mean, std=std)
+            self.frequency_head = nn.Sequential(
+                nn.LayerNorm(self.frequency.output_dim),
+                nn.Linear(self.frequency.output_dim, 64),
+                nn.GELU(),
+                nn.Dropout(config.dropout),
+            )
+            classifier_dim = backbone_dim + 64
+        else:
+            self.frequency = None
+            self.frequency_head = None
+            classifier_dim = backbone_dim
+        classifier_layers: list[nn.Module] = []
+        if config.classifier_layernorm:
+            classifier_layers.append(nn.LayerNorm(classifier_dim))
+        classifier_layers.extend([nn.Dropout(config.dropout), nn.Linear(classifier_dim, 1)])
+        self.classifier = nn.Sequential(*classifier_layers)
+
+    def extract_features(self, images: torch.Tensor) -> torch.Tensor:
+        spatial = self.backbone(images)
+        if self.frequency is not None and self.frequency_head is not None:
+            frequency = self.frequency_head(self.frequency(images))
+            spatial = torch.cat([spatial, frequency], dim=1)
+        return spatial
+
+    def classify_features(self, features: torch.Tensor) -> torch.Tensor:
+        return self.classifier(features).squeeze(1)
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
-        spatial = self.backbone(images)
-        frequency = self.frequency_head(self.frequency(images))
-        return self.classifier(torch.cat([spatial, frequency], dim=1)).squeeze(1)
+        return self.classify_features(self.extract_features(images))
 
     def checkpoint_config(self) -> dict[str, object]:
         return asdict(self.config)
@@ -97,3 +129,7 @@ class TraceGuard(nn.Module):
 
 def trainable_parameters(model: nn.Module) -> int:
     return sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
+
+
+def total_parameters(model: nn.Module) -> int:
+    return sum(parameter.numel() for parameter in model.parameters())

@@ -3,18 +3,21 @@ from __future__ import annotations
 import argparse
 import json
 import random
+from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
 from .data import (
     HuggingFaceStreamDataset,
     LabeledImageDataset,
     discover_labeled_images,
     download_kaggle_dataset,
+    fake_generator_disjoint_split,
     find_split_directory,
     group_disjoint_split,
     limit_records,
@@ -23,8 +26,8 @@ from .data import (
 )
 from .inference import resolve_device
 from .metrics import binary_metrics
-from .model import ModelConfig, TraceGuard, trainable_parameters
-from .transforms import build_eval_transform, build_train_transform
+from .model import ModelConfig, TraceGuard, total_parameters, trainable_parameters
+from .transforms import build_eval_transform, build_train_transform, normalization_for_backbone
 
 
 def seed_everything(seed: int) -> None:
@@ -35,17 +38,65 @@ def seed_everything(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def validation_scores(model, loader, device) -> tuple[list[int], list[float], float]:
+class CachedFeatureDataset(Dataset):
+    def __init__(self, features: torch.Tensor, targets: torch.Tensor, identifiers: list[str]) -> None:
+        self.features = features
+        self.targets = targets
+        self.identifiers = identifiers
+
+    def __len__(self) -> int:
+        return len(self.targets)
+
+    def __getitem__(self, index: int):
+        return self.features[index], self.targets[index], self.identifiers[index]
+
+
+def cache_features(
+    model: TraceGuard,
+    loader: DataLoader,
+    device: torch.device,
+    *,
+    views: int = 1,
+) -> CachedFeatureDataset:
+    model.eval()
+    features: list[torch.Tensor] = []
+    targets: list[torch.Tensor] = []
+    identifiers: list[str] = []
+    with torch.inference_mode():
+        for view in range(views):
+            for batch_index, (images, batch_targets, batch_identifiers) in enumerate(loader):
+                images = images.to(device)
+                with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
+                    batch_features = model.extract_features(images)
+                features.append(batch_features.float().cpu())
+                targets.append(batch_targets.cpu())
+                identifiers.extend(batch_identifiers)
+                if batch_index % 50 == 0:
+                    print(
+                        f"  caching view {view + 1}/{views}: "
+                        f"{batch_index * loader.batch_size}/{len(loader.dataset)}",
+                        flush=True,
+                    )
+    return CachedFeatureDataset(torch.cat(features), torch.cat(targets), identifiers)
+
+
+def validation_scores(
+    model,
+    loader,
+    device,
+    *,
+    cached_features: bool = False,
+) -> tuple[list[int], list[float], float]:
     model.eval()
     criterion = nn.BCEWithLogitsLoss()
     labels: list[int] = []
     scores: list[float] = []
     losses: list[float] = []
     with torch.inference_mode():
-        for images, targets, _ in loader:
-            images = images.to(device)
+        for inputs, targets, _ in loader:
+            inputs = inputs.to(device)
             targets = targets.float().to(device)
-            logits = model(images)
+            logits = model.classify_features(inputs) if cached_features else model(inputs)
             losses.append(float(criterion(logits, targets).cpu()))
             labels.extend(targets.int().cpu().tolist())
             scores.extend(torch.sigmoid(logits).cpu().tolist())
@@ -66,7 +117,28 @@ def _sample_limit(value: int) -> int | None:
     return value if value > 0 else None
 
 
-def build_training_datasets(args: argparse.Namespace):
+def balanced_group_weights(records) -> list[float]:
+    """Give every label equal mass, then every source/generator within a label equal mass."""
+    group_counts = Counter((record.label, record.group or "unknown") for record in records)
+    groups_per_label = Counter(label for label, _ in group_counts)
+    return [
+        1.0
+        / (
+            2
+            * groups_per_label[record.label]
+            * group_counts[(record.label, record.group or "unknown")]
+        )
+        for record in records
+    ]
+
+
+def build_training_datasets(args: argparse.Namespace, model_config: ModelConfig | None = None):
+    normalization = (model_config or ModelConfig()).normalization
+    train_transform = lambda: build_train_transform(normalization=normalization)
+    eval_crop_pct = (model_config or ModelConfig()).eval_crop_pct
+    eval_transform = lambda: build_eval_transform(
+        normalization=normalization, crop_pct=eval_crop_pct
+    )
     selected_sources = sum(
         bool(source)
         for source in (args.data_dir, args.hf_dataset, args.kaggle_dataset, args.wildfake_root)
@@ -85,14 +157,14 @@ def build_training_datasets(args: argparse.Namespace):
         }
         train_dataset = HuggingFaceStreamDataset(
             split=args.hf_train_split,
-            transform=build_train_transform(),
+            transform=train_transform(),
             max_samples=_sample_limit(args.max_train_samples),
             shuffle_buffer=args.hf_shuffle_buffer,
             **common,
         )
         validation_dataset = HuggingFaceStreamDataset(
             split=args.hf_validation_split,
-            transform=build_eval_transform(),
+            transform=eval_transform(),
             max_samples=_sample_limit(args.max_validation_samples),
             **common,
         )
@@ -125,8 +197,8 @@ def build_training_datasets(args: argparse.Namespace):
             _sample_limit(args.max_validation_samples),
             args.seed,
         )
-        train_dataset = LabeledImageDataset(train_records, build_train_transform())
-        validation_dataset = LabeledImageDataset(validation_records, build_eval_transform())
+        train_dataset = LabeledImageDataset(train_records, train_transform())
+        validation_dataset = LabeledImageDataset(validation_records, eval_transform())
         positive_weight = args.positive_weight if args.positive_weight is not None else 1.0
         source_name = f"Kaggle {args.kaggle_dataset}"
         return (
@@ -170,8 +242,8 @@ def build_training_datasets(args: argparse.Namespace):
             else negative_count / max(positive_count, 1)
         )
         return (
-            LabeledImageDataset(train_records, build_train_transform()),
-            LabeledImageDataset(validation_records, build_eval_transform()),
+            LabeledImageDataset(train_records, train_transform()),
+            LabeledImageDataset(validation_records, eval_transform()),
             len(train_records),
             len(validation_records),
             positive_weight,
@@ -179,10 +251,17 @@ def build_training_datasets(args: argparse.Namespace):
         )
 
     records = discover_labeled_images(args.data_dir)
-    split_fn = group_disjoint_split if args.generator_disjoint_split else stratified_split
+    if args.generator_disjoint_split and args.fake_generator_disjoint_split:
+        raise ValueError("Choose only one generator-disjoint split mode")
+    if args.fake_generator_disjoint_split:
+        split_fn = fake_generator_disjoint_split
+    elif args.generator_disjoint_split:
+        split_fn = group_disjoint_split
+    else:
+        split_fn = stratified_split
     train_records, validation_records = split_fn(records, args.val_fraction, args.seed)
-    train_dataset = LabeledImageDataset(train_records, build_train_transform())
-    validation_dataset = LabeledImageDataset(validation_records, build_eval_transform())
+    train_dataset = LabeledImageDataset(train_records, train_transform())
+    validation_dataset = LabeledImageDataset(validation_records, eval_transform())
     fake_count = sum(record.label == 1 for record in train_records)
     real_count = len(train_records) - fake_count
     positive_weight = (
@@ -216,6 +295,28 @@ def train(args: argparse.Namespace) -> Path:
 
     seed_everything(args.seed)
     device = resolve_device(args.device)
+    initial_checkpoint = None
+    if args.init_checkpoint:
+        initial_checkpoint = torch.load(args.init_checkpoint, map_location="cpu", weights_only=True)
+        config = replace(
+            ModelConfig(**initial_checkpoint.get("model_config", {})), pretrained=False
+        )
+    else:
+        normalization = (
+            normalization_for_backbone(args.backbone)
+            if args.normalization == "auto"
+            else args.normalization
+        )
+        config = ModelConfig(
+            backbone=args.backbone,
+            pretrained=not args.no_pretrained,
+            dropout=args.dropout,
+            normalization=normalization,
+            use_frequency=not args.no_frequency_branch,
+            backbone_projection=args.use_backbone_projection,
+            classifier_layernorm=not args.no_classifier_layernorm,
+            eval_crop_pct=1.0 if args.use_backbone_projection else 0.875,
+        )
     (
         train_dataset,
         validation_dataset,
@@ -223,46 +324,131 @@ def train(args: argparse.Namespace) -> Path:
         validation_count,
         positive_weight,
         source_name,
-    ) = build_training_datasets(args)
+    ) = build_training_datasets(args, config)
     loader_options = {
         "batch_size": args.batch_size,
         "num_workers": args.workers,
         "pin_memory": device.type == "cuda",
         "persistent_workers": args.workers > 0,
     }
+    sampler = None
+    if args.balance_groups:
+        if not isinstance(train_dataset, LabeledImageDataset):
+            raise ValueError("--balance-groups currently requires a local labeled-image dataset")
+        sampler = WeightedRandomSampler(
+            balanced_group_weights(train_dataset.records),
+            num_samples=len(train_dataset),
+            replacement=True,
+            generator=torch.Generator().manual_seed(args.seed),
+        )
     train_loader = DataLoader(
         train_dataset,
-        shuffle=not isinstance(train_dataset, HuggingFaceStreamDataset),
+        shuffle=sampler is None and not isinstance(train_dataset, HuggingFaceStreamDataset),
+        sampler=sampler,
         **loader_options,
     )
     validation_loader = DataLoader(validation_dataset, shuffle=False, **loader_options)
 
-    config = ModelConfig(backbone=args.backbone, pretrained=not args.no_pretrained)
     model = TraceGuard(config).to(device)
+    if initial_checkpoint is not None:
+        model.load_state_dict(initial_checkpoint["model_state"])
+    if args.freeze_backbone:
+        model.backbone.requires_grad_(False)
+    using_cached_features = args.cache_frozen_features
+    if using_cached_features:
+        if args.feature_cache_views < 1 or args.head_batch_size < 1:
+            raise ValueError("Feature-cache views and head batch size must both be positive")
+        if not args.freeze_backbone or model.frequency is not None:
+            raise ValueError(
+                "--cache-frozen-features requires --freeze-backbone and --no-frequency-branch"
+            )
+        print(f"Caching {args.feature_cache_views} augmented training feature view(s).")
+        cached_train = cache_features(
+            model, train_loader, device, views=args.feature_cache_views
+        )
+        cached_validation = cache_features(model, validation_loader, device)
+        cache_loader_options = {
+            "batch_size": args.head_batch_size,
+            "num_workers": 0,
+            "pin_memory": device.type == "cuda",
+        }
+        train_loader = DataLoader(cached_train, shuffle=True, **cache_loader_options)
+        validation_loader = DataLoader(
+            cached_validation, shuffle=False, **cache_loader_options
+        )
     pos_weight = torch.tensor([positive_weight], device=device)
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = torch.optim.AdamW(
+        (parameter for parameter in model.parameters() if parameter.requires_grad),
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+    )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     best_path = output_dir / "best.pt"
     best_auc = -1.0
+    epochs_without_improvement = 0
     history: list[dict[str, float | int]] = []
     print(
-        f"Training {trainable_parameters(model):,} parameters on {device}; "
+        f"Training {trainable_parameters(model):,} of {total_parameters(model):,} parameters "
+        f"on {device}; "
         f"{train_count} train / {validation_count} validation images from {source_name}."
     )
 
+    if args.evaluate_initial:
+        labels, scores, val_loss = validation_scores(
+            model,
+            validation_loader,
+            device,
+            cached_features=using_cached_features,
+        )
+        threshold = select_threshold(labels, scores)
+        metrics = binary_metrics(labels, scores, threshold)
+        best_auc = float(metrics["roc_auc"])
+        torch.save(
+            {
+                "model_state": model.state_dict(),
+                "model_config": model.checkpoint_config(),
+                "threshold": threshold,
+                "temperature": 1.0,
+                "epoch": 0,
+                "validation_metrics": metrics,
+                "training_source": source_name,
+                "training_config": {
+                    "initialized_from": Path(args.init_checkpoint).name
+                    if args.init_checkpoint
+                    else None,
+                    "freeze_backbone": args.freeze_backbone,
+                    "epochs_requested": args.epochs,
+                    "lr": args.lr,
+                    "weight_decay": args.weight_decay,
+                    "early_stopping_patience": args.early_stopping_patience,
+                    "cache_frozen_features": args.cache_frozen_features,
+                    "feature_cache_views": args.feature_cache_views,
+                },
+            },
+            best_path,
+        )
+        print(
+            f"epoch=00 loss=n/a val_auc={best_auc:.4f} "
+            f"val_bal_acc={metrics['balanced_accuracy']:.4f}"
+        )
+
     for epoch in range(1, args.epochs + 1):
         model.train()
+        if args.freeze_backbone:
+            model.backbone.eval()
         epoch_losses: list[float] = []
-        for images, targets, _ in train_loader:
-            images = images.to(device)
+        for inputs, targets, _ in train_loader:
+            inputs = inputs.to(device)
             targets = targets.float().to(device)
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
-                logits = model(images)
+                logits = (
+                    model.classify_features(inputs) if using_cached_features else model(inputs)
+                )
                 loss = criterion(logits, targets)
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -270,7 +456,12 @@ def train(args: argparse.Namespace) -> Path:
             epoch_losses.append(float(loss.detach().cpu()))
         scheduler.step()
 
-        labels, scores, val_loss = validation_scores(model, validation_loader, device)
+        labels, scores, val_loss = validation_scores(
+            model,
+            validation_loader,
+            device,
+            cached_features=using_cached_features,
+        )
         threshold = select_threshold(labels, scores)
         metrics = binary_metrics(labels, scores, threshold)
         row = {
@@ -280,12 +471,16 @@ def train(args: argparse.Namespace) -> Path:
             **metrics,
         }
         history.append(row)
+        (output_dir / "history.json").write_text(
+            json.dumps(history, indent=2), encoding="utf-8"
+        )
         print(
             f"epoch={epoch:02d} loss={row['train_loss']:.4f} "
             f"val_auc={row['roc_auc']:.4f} val_bal_acc={row['balanced_accuracy']:.4f}"
         )
         if float(metrics["roc_auc"]) > best_auc:
             best_auc = float(metrics["roc_auc"])
+            epochs_without_improvement = 0
             torch.save(
                 {
                     "model_state": model.state_dict(),
@@ -295,11 +490,33 @@ def train(args: argparse.Namespace) -> Path:
                     "epoch": epoch,
                     "validation_metrics": metrics,
                     "training_source": source_name,
+                    "training_config": {
+                        "initialized_from": Path(args.init_checkpoint).name
+                        if args.init_checkpoint
+                        else None,
+                        "freeze_backbone": args.freeze_backbone,
+                        "epochs_requested": args.epochs,
+                        "lr": args.lr,
+                        "weight_decay": args.weight_decay,
+                        "early_stopping_patience": args.early_stopping_patience,
+                        "cache_frozen_features": args.cache_frozen_features,
+                        "feature_cache_views": args.feature_cache_views,
+                    },
                 },
                 best_path,
             )
+        else:
+            epochs_without_improvement += 1
+            if (
+                args.early_stopping_patience > 0
+                and epochs_without_improvement >= args.early_stopping_patience
+            ):
+                print(
+                    f"Early stopping after {epoch} epochs; validation ROC-AUC did not improve "
+                    f"for {args.early_stopping_patience} consecutive epochs."
+                )
+                break
 
-    (output_dir / "history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
     print(f"Best checkpoint: {best_path} (validation ROC-AUC {best_auc:.4f})")
     return best_path
 
@@ -360,11 +577,71 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow replacing an existing best.pt/history.json already in --output-dir",
     )
     parser.add_argument("--backbone", default="efficientnet_b0")
+    parser.add_argument(
+        "--init-checkpoint",
+        help="Initialize the full model from an existing compatible TraceGuard checkpoint.",
+    )
+    parser.add_argument(
+        "--evaluate-initial",
+        action="store_true",
+        help="Evaluate/save epoch 0 before optimization, preserving the initializer if tuning hurts.",
+    )
+    parser.add_argument(
+        "--normalization",
+        choices=("auto", "imagenet", "clip"),
+        default="auto",
+        help="Input normalization; auto selects CLIP statistics for CLIP backbones.",
+    )
+    parser.add_argument("--dropout", type=float, default=0.25)
+    parser.add_argument(
+        "--freeze-backbone",
+        action="store_true",
+        help="Train only the detection head (and frequency branch, if enabled).",
+    )
+    parser.add_argument(
+        "--no-frequency-branch",
+        action="store_true",
+        help="Use only spatial backbone features; useful for a frozen CLIP linear probe.",
+    )
+    parser.add_argument(
+        "--use-backbone-projection",
+        action="store_true",
+        help="Keep a pretrained backbone's native projection head, required for official CLIP "
+        "embedding probes.",
+    )
+    parser.add_argument(
+        "--no-classifier-layernorm",
+        action="store_true",
+        help="Use a plain linear detection head, matching UniversalFakeDetect's CLIP probe.",
+    )
+    parser.add_argument(
+        "--cache-frozen-features",
+        action="store_true",
+        help="Cache frozen spatial features once, then tune the head without repeat backbone passes.",
+    )
+    parser.add_argument(
+        "--feature-cache-views",
+        type=int,
+        default=1,
+        help="Number of independently augmented training views to cache.",
+    )
+    parser.add_argument(
+        "--head-batch-size",
+        type=int,
+        default=1024,
+        help="Batch size for cached-feature head optimization.",
+    )
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
+    parser.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=0,
+        help="Stop after this many non-improving validation epochs; 0 disables early stopping.",
+    )
     parser.add_argument("--positive-weight", type=float)
     parser.add_argument("--val-fraction", type=float, default=0.15)
     parser.add_argument(
@@ -375,6 +652,17 @@ def build_parser() -> argparse.ArgumentParser:
         "during training. Only meaningful when images were named by traceguard-materialize "
         "(which encodes generator identity in the filename) - plain local folders with no "
         "recoverable group identity will raise an error rather than silently no-op.",
+    )
+    parser.add_argument(
+        "--fake-generator-disjoint-split",
+        action="store_true",
+        help="Hold out fake generator groups but stratify authentic sources across both splits, "
+        "avoiding real-source/content confounding.",
+    )
+    parser.add_argument(
+        "--balance-groups",
+        action="store_true",
+        help="Sample local training records so each label and source/generator has equal mass.",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="auto")
