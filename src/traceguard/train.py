@@ -205,18 +205,77 @@ def build_training_datasets(args: argparse.Namespace, train_transform, eval_tran
     )
 
 
+def pick_resume_checkpoint(directory: str | Path, explicit_path: str | None) -> Path | None:
+    """Resolve which checkpoint (if any) to resume training from.
+
+    An explicit path always wins. Otherwise, look for <directory>/latest.pt - the checkpoint
+    train() overwrites after every epoch specifically so an interrupted run (a killed DataLoader
+    worker, a disconnected Colab runtime) can be continued without redoing finished epochs.
+    Returns None when neither is available, so callers can fall back to starting fresh.
+    """
+    if explicit_path:
+        return Path(explicit_path)
+    candidate = Path(directory) / "latest.pt"
+    return candidate if candidate.is_file() else None
+
+
+def save_training_state(
+    path: str | Path,
+    *,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler,
+    epoch: int,
+    threshold: float,
+    training_source: str,
+    metrics: dict,
+    best_auc: float,
+    history: list,
+) -> dict:
+    """Write a checkpoint carrying everything needed to resume training exactly where it left off.
+
+    Unlike best.pt (saved only when validation AUC improves, and read only at inference time),
+    this is overwritten after every epoch so a crash never costs more than the current epoch's
+    work. It captures optimizer/scheduler state alongside model weights because AdamW's running
+    moment estimates and the cosine schedule's position both shape how training behaves from here;
+    reloading only the weights would resume with a "fresh" optimizer and silently change the
+    learning trajectory versus an uninterrupted run.
+    """
+    checkpoint = {
+        "model_state": model.state_dict(),
+        "model_config": model.checkpoint_config() if hasattr(model, "checkpoint_config") else {},
+        "optimizer_state": optimizer.state_dict(),
+        "scheduler_state": scheduler.state_dict(),
+        "epoch": epoch,
+        "threshold": threshold,
+        "temperature": 1.0,
+        "training_source": training_source,
+        "validation_metrics": metrics,
+        "best_auc": best_auc,
+        "history": history,
+    }
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(checkpoint, path)
+    return checkpoint
+
+
 def train(args: argparse.Namespace) -> Path:
     output_dir = Path(args.output_dir)
+    resume_checkpoint_path = None
+    if args.resume or args.resume_from:
+        resume_checkpoint_path = pick_resume_checkpoint(output_dir, args.resume_from)
+
     previous_results = [
         path for path in (output_dir / "best.pt", output_dir / "history.json") if path.is_file()
     ]
-    if previous_results and not args.overwrite:
+    if previous_results and not args.overwrite and resume_checkpoint_path is None:
         found = ", ".join(str(path) for path in previous_results)
         raise FileExistsError(
             f"{output_dir} already has training results ({found}). Refusing to overwrite them. "
             "Pick a new --output-dir for this run, e.g. checkpoints/<source>/run_XXX such as "
-            "checkpoints/cifake/run_002, or pass --overwrite if replacing this run's results is "
-            "intentional."
+            "checkpoints/cifake/run_002, pass --overwrite if replacing this run's results is "
+            "intentional, or pass --resume if you meant to continue an interrupted run here."
         )
 
     seed_everything(args.seed)
@@ -270,8 +329,21 @@ def train(args: argparse.Namespace) -> Path:
 
     output_dir.mkdir(parents=True, exist_ok=True)
     best_path = output_dir / "best.pt"
+    latest_path = output_dir / "latest.pt"
+
+    start_epoch = 1
     best_auc = -1.0
     history: list[dict[str, float | int]] = []
+    if resume_checkpoint_path is not None:
+        print(f"Resuming from {resume_checkpoint_path}")
+        state = torch.load(resume_checkpoint_path, map_location=device, weights_only=True)
+        model.load_state_dict(state["model_state"])
+        optimizer.load_state_dict(state["optimizer_state"])
+        scheduler.load_state_dict(state["scheduler_state"])
+        best_auc = state["best_auc"]
+        history = state["history"]
+        start_epoch = state["epoch"] + 1
+
     print(
         f"Backbone {config.backbone} "
         f"({'frozen' if config.freeze_backbone else 'fine-tuned'}), "
@@ -282,8 +354,16 @@ def train(args: argparse.Namespace) -> Path:
         f"{trainable_parameters(model) + frozen_parameters(model):,} parameters on {device}; "
         f"{train_count} train / {validation_count} validation images from {source_name}."
     )
+    if resume_checkpoint_path is not None:
+        print(
+            f"Resuming at epoch {start_epoch} of {args.epochs} "
+            f"(best ROC-AUC so far: {best_auc:.4f})."
+        )
+        if start_epoch > args.epochs:
+            print("Resume checkpoint already reached --epochs; nothing left to train.")
+            return best_path
 
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(start_epoch, args.epochs + 1):
         model.train()
         epoch_losses: list[float] = []
         for images, targets, _ in train_loader:
@@ -327,6 +407,21 @@ def train(args: argparse.Namespace) -> Path:
                 },
                 best_path,
             )
+        # Overwritten every epoch regardless of whether it was a new best, so a crash - a killed
+        # DataLoader worker, a disconnected Colab runtime - never costs more than this epoch's
+        # work. --resume picks back up from here.
+        save_training_state(
+            latest_path,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            epoch=epoch,
+            threshold=threshold,
+            training_source=source_name,
+            metrics=metrics,
+            best_auc=best_auc,
+            history=history,
+        )
 
     (output_dir / "history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
     print(f"Best checkpoint: {best_path} (validation ROC-AUC {best_auc:.4f})")
@@ -387,6 +482,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--overwrite",
         action="store_true",
         help="Allow replacing an existing best.pt/history.json already in --output-dir",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Continue an interrupted run from <output-dir>/latest.pt if it exists; otherwise "
+        "starts fresh as normal, so it is safe to pass on every invocation. Requires the same "
+        "--backbone, --freeze-backbone, --no-frequency, and --epochs as the original run, since "
+        "those determine the model/optimizer/scheduler that the checkpoint's state loads onto.",
+    )
+    parser.add_argument(
+        "--resume-from",
+        help="Resume from this specific checkpoint file instead of <output-dir>/latest.pt.",
     )
     parser.add_argument(
         "--backbone",
