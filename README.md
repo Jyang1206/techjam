@@ -1,289 +1,307 @@
 # TraceGuard
 
-TraceGuard is a hackathon-scale detector for AI-generated images that is designed around the
-failure mode that matters in practice: images get compressed, resized, cropped, filtered, and
-reposted. It combines a compact visual backbone with explicit frequency-domain evidence, trains
-with realistic degradations, and can average predictions across redistributed views at inference.
+TraceGuard is a robustness-first detector for AI-generated and manipulated images. It is designed
+for the conditions in which images are actually encountered: after JPEG compression, resizing,
+cropping, filtering, screenshots, and reposting.
 
-The default EfficientNet-B0 model has roughly 4.0 million trainable parameters, comfortably below the
-2-billion-parameter limit. TraceGuard outputs a calibrated probability rather than treating a
-forensic model as ground truth.
+The submitted detector combines frozen **DINOv2-L** visual embeddings with explicit radial FFT
+frequency statistics. A lightweight router sends dominant-face crops to a face specialist and every
+full image to a scene specialist; the final prediction is the larger of the applicable route scores.
+The output is a probability from 0 to 1, where a larger value means the image is more likely to be
+AI-generated or manipulated.
 
-## What is included
+> TraceGuard is a screening tool, not proof of provenance. Its scores should support human review,
+> not serve as the sole basis for punitive or reputational decisions.
 
-- A two-branch PyTorch detector with an EfficientNet spatial branch and radial FFT statistics.
-- Robust training augmentation covering JPEG, blur, resize, noise, color changes, and center crop.
-- A required directory-to-JSON inference command with `image_path` and `pred` fields.
-- A reproducible robustness benchmark with clean/transformed metrics and error exemplars.
-- A Gradio demo for individual inspection, stability probes, and batch JSON export.
-- Focused tests for metrics, transformations, dataset discovery, and output behavior.
+## Project overview
 
-## Quickstart: run everything end-to-end
+### Submitted DINOv2 pipeline
 
-This is the fastest path from a clean checkout to a working model, predictions, a robustness
-report, and a live demo. Each step links to the fuller section below if you need more detail or
-want a different dataset.
+1. Re-encode the input in memory as JPEG quality 95 to reduce file-format shortcuts.
+2. Detect whether a face occupies at least 15% of the frame using an OpenCV Haar cascade.
+3. Extract a 1,024-dimensional frozen DINOv2-L embedding from the full image and, when applicable,
+   the dominant face crop.
+4. Concatenate the embedding with 70 radial FFT frequency features.
+5. Score the full image with the scene head and the face crop with the face head.
+6. Return the maximum route score as the final prediction.
+
+The repository also contains an earlier EfficientNet-B0 + FFT implementation under
+`src/traceguard/`. It follows the same degradation-aware design but is retained mainly as a
+comparison branch. The commands in this README use the submitted DINOv2 pipeline unless a section
+explicitly says otherwise.
+
+### Included deliverables
+
+- Recursive directory-to-JSON inference with `image_path` and `pred` fields.
+- Shipped face and scene heads in `checkpoints/dinov2/`.
+- A Gradio interface for live inference, robustness summaries, and error galleries.
+- Deterministic data curation, feature extraction, head training, and evaluation modules.
+- Generator/method-disjoint evaluation and a corruption grid covering JPEG, blur, resize, noise,
+  color changes, and cropping.
+- Checked-in evaluation tables, ablations, and representative false-positive/false-negative cases.
+
+### Submission criteria mapping
+
+| Criterion | Where it is addressed |
+|---|---|
+| Project overview | Architecture, routing, model outputs, and deliverables are described above. |
+| Setup and installation | The environment, dependency, CUDA/CPU, and verification commands are documented below. |
+| Reproducible results | The complete curation-to-evaluation workflow is provided under “Steps to reproduce the results.” |
+| Limitations and reflection | Known failure modes and prioritized improvements are documented under “Limitations and future improvements.” |
+| Team contributions | Responsibilities for Nazim, Li Heng, Zavier, Tobias, and Jie Yang are listed below. |
+| Well-structured, commented code | The solution is separated into curation, feature extraction, training, evaluation, inference, and UI modules. Each main module contains a module-level description, focused functions/classes, and comments around non-obvious pipeline decisions. |
+| Required inference script | [`traceguard_data/predict_v2.py`](traceguard_data/predict_v2.py) recursively accepts an image directory and writes one AIGC confidence score per image to JSON using the required `image_path` and `pred` fields. |
+
+The implementation is organized by responsibility:
+
+| Component | Main code |
+|---|---|
+| Dataset configuration and deterministic curation | `traceguard_data/config.py`, `run.py`, `df40.py`, `scenes.py`, `finalize.py` |
+| DINOv2 and FFT feature extraction | `traceguard_data/extract.py` |
+| Head training and ablations | `traceguard_data/heads.py` |
+| Robustness evaluation and error analysis | `traceguard_data/eval.py` |
+| Required batch inference | `traceguard_data/predict_v2.py` |
+| Interactive demo | `traceguard_data/ui.py` |
+| Automated checks | `tests/` |
+
+### Results at a glance
+
+| Evaluation | ROC-AUC | Notes |
+|---|---:|---|
+| Scene validation | 0.993 | Includes generator-disjoint validation |
+| Scene, unseen Flux/SD3 generators | 0.972 | GenImage++ clean slice |
+| Face validation | 0.832 | Video-disjoint split |
+| Face, six unseen manipulation methods | 0.726 | Clean/canonical view |
+| Scene, local tampering | 0.650 | Primary failure mode |
+
+Across the checked-in corruption evaluation, the unseen-method face route ranges from 0.641 to
+0.735 AUC and the combined scene evaluation ranges from 0.781 to 0.953 AUC. The full route-specific
+tables are in [`outputs/evaluation/dinov2/`](outputs/evaluation/dinov2/).
+
+### Repository layout
+
+| Path | Purpose |
+|---|---|
+| `traceguard_data/predict_v2.py` | Submitted DINOv2 inference CLI |
+| `traceguard_data/ui.py` | DINOv2 Gradio application |
+| `traceguard_data/` | Curation, extraction, training, and evaluation pipeline |
+| `checkpoints/dinov2/` | Shipped lightweight face and scene heads |
+| `outputs/evaluation/dinov2/` | Metrics, ablations, audit artifacts, and error galleries |
+| `src/traceguard/` | First-generation EfficientNet-B0 + FFT implementation |
+| `tests/` | Unit and integration tests |
+
+## Setup and installation
+
+### Requirements
+
+- Python 3.10-3.12
+- About 8 GB of memory for inference; more is recommended for batch processing
+- An NVIDIA CUDA GPU is strongly recommended, although CPU inference is supported
+- Internet access on first use so `timm` can download the DINOv2-L backbone weights
+
+The small trained heads are included in the repository. The much larger DINOv2-L backbone is
+downloaded and cached automatically on the first inference run.
+
+### Create an environment
+
+From the repository root:
 
 ```bash
-# 1. Install (see "Setup" below for details)
 python -m venv .venv
-source .venv/bin/activate   # .venv\Scripts\activate on Windows
-pip install --upgrade pip
-pip install -e ".[dev]"
-
-# 2. Train a model. This example downloads CIFAKE via Kaggle and trains in one step
-#    (requires a Kaggle account/API token the first time). See "Data layout" and the
-#    dataset-specific sections below for SID_Set, WildFake, or your own local folders.
-traceguard-train --kaggle-dataset birdy654/cifake-real-and-ai-generated-synthetic-images \
-  --epochs 5 --batch-size 64 --workers 2 \
-  --output-dir checkpoints/cifake
-
-# 3. Score a directory of images (this is the required challenge deliverable script,
-#    see "Required inference output" below)
-traceguard-predict path/to/image_directory \
-  --checkpoint checkpoints/cifake/best.pt \
-  --output predictions.json
-
-# 4. Run the robustness benchmark against a labeled real/ + fake/ test folder
-#    (see "Robustness evaluation" below). This writes the table for Devpost.
-traceguard-evaluate data/test \
-  --checkpoint checkpoints/cifake/best.pt \
-  --output-dir outputs/evaluation
-
-# 5. Launch the interactive demo (see "Demo" below) — good for the submission video
-traceguard-demo --checkpoint checkpoints/cifake/best.pt
-# then open http://127.0.0.1:7860
 ```
 
-Notes:
+Activate it on Windows PowerShell:
 
-- Step 2's checkpoint path (`checkpoints/cifake/best.pt`) is whatever you passed to
-  `--output-dir` plus `best.pt` — reuse that exact path in steps 3-5.
-- Checkpoints worth sharing are committed to this repository under `checkpoints/<source>/run_XXX/`,
-  with `.pt` files tracked via **Git LFS** rather than plain git so they don't bloat repo history.
-  Install Git LFS once before cloning/pulling (`brew install git-lfs && git lfs install`, or your
-  OS's equivalent) — without it you'll only get small pointer files instead of real model weights.
-  Not every checkpoint is pushed; if the one you need isn't there, train it yourself locally.
-- Step 3's target directory just needs images (any mix of real/fake, unlabeled) — it produces a
-  score per image. Step 4 needs a **labeled** folder with `real/` and `fake/` subfolders because it
-  needs ground truth to compute accuracy/AUC.
-- Run `pytest` at any point to check the test suite still passes: `pytest -q`.
+```powershell
+.venv\Scripts\Activate.ps1
+```
 
-## Setup
-
-Python 3.10-3.12 is recommended. Create an environment and install the project:
+Or on macOS/Linux:
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
+source .venv/bin/activate
+```
+
+Install the project and DINOv2 pipeline dependencies:
+
+```bash
 python -m pip install --upgrade pip
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
+python -m pip install -r traceguard_data/requirements.txt
 ```
 
-On macOS or Linux, activate with `source .venv/bin/activate`. The first training run downloads
-ImageNet backbone weights. Pass `--no-pretrained` for an offline run.
-
-## Data layout
-
-Export public or properly licensed source data into class folders. Keep generator families and
-near-duplicates in only one split when preparing a serious experiment; random image-level splits
-can leak visual families and inflate accuracy.
-
-```text
-data/train/
-  real/
-    source_a/example_001.jpg
-  fake/
-    generator_a/example_002.png
-
-data/test/
-  real/
-  fake/
-```
-
-Suitable starting points from the challenge are SID_Set, CIFAKE, and the training portion of
-WildFake. The held-out COCO val2017 and DALL-E Advanced validation subset described in the brief
-must not be used for training or model selection.
-
-### Stream SID_Set
-
-SID_Set is approximately 140 GB, so TraceGuard streams it from Hugging Face instead of requiring a
-complete local download. Its labels are mapped as `0 -> authentic` and `1/2 -> AIGC` (fully
-synthetic or tampered). This command uses 20,000 training and 4,000 validation images by default:
-
-**Get a free Hugging Face token first** — without one, streaming is unauthenticated and rate-limited,
-which can make even a modest sample take a very long time (observed as slow as ~1/13th the speed of
-an authenticated pull). Same applies to `traceguard-materialize --hf-dataset` (see below).
-
-1. Sign up or log in at [huggingface.co](https://huggingface.co), then create a token at
-   [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) — the **Read** role is
-   enough, no write access needed.
-2. Save it locally, once, with:
-   ```bash
-   hf auth login --token hf_your_token_here
-   ```
-   (older docs may say `huggingface-cli login`; that command is deprecated in favor of `hf`.) This
-   writes to `~/.cache/huggingface/token` — outside this repo, never committed, never something to
-   put in a project file.
-
-This command uses 20,000 training and 4,000 validation images by default:
+For CUDA, install the PyTorch build appropriate for the machine before running the final command;
+otherwise pip may install a CPU-only build. Confirm the environment with:
 
 ```bash
-traceguard-train --hf-dataset saberzl/SID_Set \
-  --epochs 5 --batch-size 24 --workers 2 \
-  --output-dir checkpoints/sid
+python -c "import torch; print('PyTorch:', torch.__version__, 'CUDA:', torch.cuda.is_available())"
+python -m pytest -q
 ```
 
-Increase the sample limits with `--max-train-samples` and `--max-validation-samples`; pass `0` to
-stream an entire split. The default positive-class weight is `0.5` because SID_Set contains two
-positive categories for one authentic category. Override it with `--positive-weight` when using a
-different dataset or sampling policy.
+### Run inference
 
-Launch the demo with the SID_Set checkpoint using:
-
-```bash
-traceguard-demo --checkpoint checkpoints/sid/best.pt
-```
-
-SID_Set is published under CC BY 4.0. Attribute the dataset and cite the SIDA paper in the public
-submission; the canonical license, author list, and BibTeX are maintained on the
-[SID_Set dataset card](https://huggingface.co/datasets/saberzl/SID_Set).
-
-### Download and train on CIFAKE
-
-TraceGuard can download CIFAKE through the official Kaggle client and use its provided `train` and
-`test` split instead of making a new random split. The default caps select a balanced 20,000-image
-training subset and 4,000-image test subset:
+The required submission script is `traceguard_data/predict_v2.py`. It recursively scores every
+supported image under the input directory and writes an AIGC confidence score between 0 and 1 for
+each image:
 
 ```bash
-traceguard-train \
-  --kaggle-dataset birdy654/cifake-real-and-ai-generated-synthetic-images \
-  --epochs 5 --batch-size 64 --workers 2 \
-  --output-dir checkpoints/cifake
-```
-
-Pass `--max-train-samples 0 --max-validation-samples 0` to use all 100,000 training and 20,000 test
-images. CIFAKE is balanced, so its default positive-class weight is `1.0`. The dataset is MIT
-licensed and requires citation of both CIFAR-10 and Bird and Lotfi's CIFAKE paper; see the
-[canonical Kaggle dataset card](https://www.kaggle.com/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images).
-
-### Train on a bounded WildFake subset
-
-The ModelScope WildFake repository is approximately 1.29 TB with 3,694,313 manifest rows. Do not
-download it indiscriminately on a hackathon machine. Install the ModelScope CLI separately, then
-download the official manifests and only the image archives you intend to use:
-
-```bash
-pip install "modelscope>=1.34,<2"
-modelscope download --dataset hy2628982280/WildFake \
-  --local_dir data/WildFake \
-  --include "split_train_test/csv_file/total_split/*" \
-            "Images/Real/<chosen-source>/*" \
-            "Images/Diffusion_based/<chosen-source>/*"
-```
-
-After extracting the selected image archives so their paths match the manifest, train with:
-
-```bash
-traceguard-train --wildfake-root data/WildFake \
-  --max-train-samples 20000 --max-validation-samples 4000 \
-  --epochs 5 --batch-size 24 --workers 2 \
-  --output-dir checkpoints/wildfake
-```
-
-TraceGuard uses the official `train_metadata.csv` and `test_metadata.csv`, creates a balanced
-reservoir sample from the archives that are actually present, and records ModelScope provenance in
-the checkpoint. It excludes all real COCO rows and advanced DALL-E rows by default to keep the
-challenge's protected COCO val2017 / DALL-E Advanced demonstration set out of training and threshold
-selection. Do not use `--allow-protected-wildfake` for the challenge submission.
-
-WildFake is marked Apache 2.0 on its
-[ModelScope card](https://modelscope.cn/datasets/hy2628982280/WildFake/summary). Cite the
-[WildFake AAAI paper](https://ojs.aaai.org/index.php/AAAI/article/view/32363) in the submission.
-
-## Train
-
-```bash
-traceguard-train data/train --epochs 12 --batch-size 32 --output-dir checkpoints
-```
-
-Training uses a stratified 85/15 split, class-weighted binary cross entropy, AdamW, cosine learning
-rate decay, and a validation-selected decision threshold. The best checkpoint and epoch history are
-written to `checkpoints/`. For a stronger result, create source-disjoint train/validation folders and
-adapt the loader so the validation set never shares generator or capture pipelines with training.
-
-## Required inference output
-
-```bash
-traceguard-predict path/to/image_directory \
-  --checkpoint checkpoints/best.pt \
+python -m traceguard_data.predict_v2 path/to/images \
+  --heads-dir checkpoints/dinov2 \
+  --device cuda \
+  --batch-size 8 \
   --output predictions.json
 ```
 
-The directory is scanned recursively. `pred` is the probability that an image is AIGC-generated:
+Use `--device cpu` when CUDA is unavailable. CPU inference works but is substantially slower.
+The output follows this contract:
 
 ```json
 [
-  {"image_path": "path/to/image_directory/photo.jpg", "pred": 0.0831},
-  {"image_path": "path/to/image_directory/render.png", "pred": 0.9472}
+  {"image_path": "path/to/images/photo.jpg", "pred": 0.0831},
+  {"image_path": "path/to/images/render.png", "pred": 0.9472}
 ]
 ```
 
-Use `--tta none` to disable robust consensus and reduce inference from four views to one.
+Unreadable images remain in the output with `"pred": null` and an `error` field.
 
-## Robustness evaluation
-
-```bash
-traceguard-evaluate data/test \
-  --checkpoint checkpoints/best.pt \
-  --output-dir outputs/evaluation
-```
-
-This evaluates clean images and every challenge transformation/severity. It produces:
-
-- `metrics.json` and `metrics.csv` for analysis.
-- `robustness_table.md` for the Devpost submission.
-- `error_analysis.json` with the highest-confidence false positives and false negatives.
-
-Report ROC-AUC, balanced accuracy, false-positive rate, and false-negative rate. Also compare the
-worst transformed condition to clean performance. Accuracy alone can hide class imbalance and a
-high false-positive cost.
-
-## Demo
+The directory can also be passed with the named `--input_dir` option:
 
 ```bash
-traceguard-demo --checkpoint checkpoints/best.pt
+python -m traceguard_data.predict_v2 \
+  --input_dir path/to/images \
+  --heads-dir checkpoints/dinov2 \
+  --device cpu \
+  --output predictions.json
 ```
 
-Open <http://127.0.0.1:7860>. The first tab displays probability and score stability under JPEG,
-blur, resize, and crop probes. The batch tab creates the same JSON contract as the CLI.
+### Launch the demo
 
-## Technical approach
+```bash
+python -m traceguard_data.ui \
+  --device cuda \
+  --heads-dir checkpoints/dinov2 \
+  --results-dir outputs/evaluation/dinov2
+```
 
-The spatial branch learns semantic and texture cues with EfficientNet-B0. The frequency branch
-computes radial mean and variance across the log FFT magnitude plus color statistics. This explicit
-signal gives the classifier a compact view of resampling, synthesis, and spectral artifacts while
-the visual backbone handles content-dependent evidence. The features are fused only at the final
-head so either branch can remain useful when redistribution weakens the other.
+Open <http://127.0.0.1:7860>. Replace `cuda` with `cpu` if needed. Add `--share` only when a
+temporary public Gradio URL is required.
 
-During training, one realistic degradation is sampled before the usual crop and flip. At inference,
-robust consensus averages logits from clean, JPEG-70, half-resolution, and 80% crop views. The
-stability spread shown in the demo is an uncertainty cue: large changes under benign transforms are
-a reason to avoid an automatic decision.
+## Steps to reproduce the results
 
-## Limitations and responsible use
+There are two levels of reproduction: running the released detector with the shipped heads, and
+rebuilding the dataset, embeddings, heads, and evaluation from raw sources.
 
-TraceGuard estimates image provenance; it does not prove it. It can fail on unseen generators,
-heavy edits, screenshots, illustrations, computational photography, and images whose real camera
-pipeline resembles synthetic artifacts. Dataset shortcuts and generator leakage are major risks.
-False positives can unfairly discredit authentic creators, so low-confidence or unstable results
-should go to human review and should never be the sole basis for punitive action.
+### 1. Reproduce released inference
 
-With more time, we would add generator-disjoint cross-validation, probability calibration on a
-deployment-matched set, provenance metadata such as C2PA as a separate signal, Grad-CAM validation,
-and continuous tests against newly released generators and editing pipelines.
+1. Complete the installation above.
+2. Place evaluation images in a directory without changing their contents.
+3. Run `traceguard_data.predict_v2` with `--heads-dir checkpoints/dinov2`.
+4. Use the same input directory, `--input-size 224`, and device precision when comparing outputs.
 
-## Team contributions
+The pipeline uses deterministic preprocessing. The included
+`outputs/evaluation/dinov2/smoke_test_predictions.json` demonstrates the expected JSON structure.
 
-Add names and concrete responsibilities here before submission. For a solo entry, state that all
-modeling, engineering, evaluation, and presentation work was completed by the named participant.
+### 2. Rebuild the reported experiment
+
+The curated images (~41 GB) and cached embedding shards (~4 GB) are intentionally not committed.
+Obtain the source datasets under their respective licenses and arrange them according to
+`traceguard_data/config.py`. The experiment uses DF40, WildFake, SID-Set,
+CommunityForensics-Small, and GenImage++; protected challenge evaluation data must never be used for
+training or threshold selection.
+
+The default configuration reads raw data from `~/data/` and fixes all sampling decisions with seed
+42. From the repository root, run:
+
+```bash
+# A. Curate, verify, deduplicate, split, and write ~/data/curated/manifest.csv
+python -m traceguard_data.run --stage all
+
+# B. Score photorealism, inspect the generated sheet, then apply the selected threshold
+python -m traceguard_data.realism score
+python -m traceguard_data.realism sheet --threshold 0.5
+python -m traceguard_data.realism apply --threshold 0.5
+
+# C. Extract the complete clean and corruption-view feature sets
+python -m traceguard_data.extract --category face --view-plan full \
+  --out ~/data/embeddings/face --device cuda
+python -m traceguard_data.extract --category scene --view-plan full \
+  --out ~/data/embeddings/scene --device cuda
+
+# D. Evaluate the shipped heads against the rebuilt embeddings
+python -m traceguard_data.eval --embeddings ~/data/embeddings/face \
+  --head checkpoints/dinov2/face_head.pkl --category face \
+  --out outputs/evaluation/dinov2
+python -m traceguard_data.eval --embeddings ~/data/embeddings/scene \
+  --head checkpoints/dinov2/scene_head.pkl --category scene \
+  --out outputs/evaluation/dinov2
+python -m traceguard_data.eval --combine --out outputs/evaluation/dinov2
+
+# E. Retrain all candidate heads and reproduce the ablation comparisons
+python -m traceguard_data.heads --embeddings ~/data/embeddings/face \
+  --category face --device cuda --out ~/data/rebuilt_heads
+python -m traceguard_data.heads --embeddings ~/data/embeddings/scene \
+  --category scene --device cuda --out ~/data/rebuilt_heads
+```
+
+The rebuilt heads are written outside the repository so they do not overwrite the released model.
+Feature extraction is resume-safe and skips completed `(image hash, view)` pairs.
+
+The shipped face head uses the degradation-trained `all_views` variant because it performed better
+on every unseen-method robustness view, despite scoring about one point lower on clean validation
+than the automatically selected canonical variant. Consequently, a fresh `heads.py` run reproduces
+the candidate comparison but selects the canonical face head by clean validation AUC; use the
+shipped `face_head.pkl` to reproduce the reported robustness table. This selection decision and the
+complete ablations are documented in
+[`outputs/evaluation/dinov2/ablation_face.md`](outputs/evaluation/dinov2/ablation_face.md) and
+[`outputs/evaluation/dinov2/ablation_scene.md`](outputs/evaluation/dinov2/ablation_scene.md).
+
+For the older EfficientNet branch, see the installed command help:
+
+```bash
+traceguard-train --help
+traceguard-predict --help
+traceguard-evaluate --help
+traceguard-demo --help
+```
+
+## Limitations and future improvements
+
+- **Local tampering is the largest blind spot.** The scene route reaches only about 0.65 AUC and a
+  91% false-negative rate on locally tampered images because a global CLS embedding can overlook a
+  small edited region. With more time, we would add patch-level tokens, localization supervision,
+  and a tamper-specific head.
+- **The face route has real-domain shift.** Celeb-DF authentic faces produce a 25-28% false-positive
+  rate. We would expand the authentic-face domains, camera pipelines, demographics, and compression
+  histories used during training.
+- **The routing heuristic is simple.** Studio portraits with a face just below the 15% area
+  threshold can be sent only to the scene head. A learned router or overlapping multi-crop inference
+  would reduce this discontinuity.
+- **Robustness remains uneven.** Heavy noise is the worst tested corruption, and the scene head was
+  not trained on the complete degradation set. We would finish degradation-matched scene training
+  and validate on screenshots and social-media recompression chains.
+- **Scores are not universally calibrated.** A threshold fitted on one domain may not transfer to a
+  different platform or content type. We would add deployment-specific calibration, abstention for
+  uncertain cases, and drift monitoring.
+- **Dataset shortcuts remain a risk.** JPEG normalization, source-aware splits, and held-out
+  generators reduce shortcut learning but cannot eliminate it. Broader generator-disjoint and
+  cross-dataset evaluation should be continuous as new generators appear.
+- **No provenance metadata is used.** Future versions should combine forensic scores with C2PA or
+  other signed provenance signals while keeping the two sources of evidence independently visible.
+
+## Team member contributions
+
+The team collaborated across the project, with the following primary areas of responsibility:
+
+| Team member | Contributions |
+|---|---|
+| Nazim | Project coordination, solution architecture, experiment design, and DINOv2 integration |
+| Li Heng | Dataset acquisition and curation, source-aware splitting, deduplication, and provenance tracking |
+| Zavier | FFT feature engineering, head training, model ablations, and performance optimization |
+| Tobias | Directory-to-JSON inference pipeline, Gradio interface, integration testing, and deployment support |
+| Jie Yang | Robustness benchmarking, error analysis, result validation, documentation, and presentation |
+
+## Responsible use
+
+False positives can unfairly discredit authentic creators, while false negatives can create false
+confidence. Treat TraceGuard as one signal among visual review, source context, metadata, and signed
+provenance. Do not use a single model score as definitive evidence that an image is real or fake.
