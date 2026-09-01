@@ -91,3 +91,16 @@ Full tables: `outputs/evaluation/dinov2/robustness_table.md` and
 
 <!-- fill in: who did what across the EfficientNet branch, the DINOv2 branch,
      data curation, evaluation, demo, writeup -->
+
+## What is in this repo (DINOv2 branch)
+
+| Path | Contents |
+|---|---|
+| `traceguard_data/` | Pipeline modules: curation (`run.py`, `df40.py`, `scenes.py`, `finalize.py`), realism filter (`realism.py`), embedding extraction (`extract.py`), heads (`heads.py`), evaluation (`eval.py`), **judged inference script (`predict_v2.py`)**, demo UI (`ui.py`) |
+| `traceguard_data/pipeline_scripts/` | One-off stage scripts used during the build (raw HF pull, meta repair, parquet label probe, real-diversity patch) — kept for provenance |
+| `checkpoints/dinov2/` | Trained heads: `face_head.pkl`, `scene_head.pkl` (shipped) plus `face_head_canonical.pkl`, `face_head_allviews.pkl`, `scene_head_prepatch.pkl` (ablation/comparison variants) |
+| `outputs/evaluation/dinov2/` | `results_summary.md`, `robustness_table.md`, per-category `results_*.md` and `ablation_*.md/json`, degradation + score plots, `error_gallery/` (top-15 FP/FN per category with CSVs), `smoke_test_predictions.json` (example script output) |
+| `outputs/evaluation/dinov2/dataset/` | `audit_report.md` (full dataset provenance, deviations, bias find/fix), `manifest.csv.gz` (every curated image: sha256, source, generator, label, category, split, style), audit visuals |
+
+Not in the repo (size): the curated images (~41 GB) and embedding parquet shards
+(~4 GB) live in S3; `manifest.csv.gz` fully specifies which image is which.

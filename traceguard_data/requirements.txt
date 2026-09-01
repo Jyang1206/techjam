@@ -1,0 +1,16 @@
+# DINOv2 branch (traceguard_data/) — inference + training/eval
+torch>=2.0
+torchvision
+timm>=1.0          # DINOv2-L backbone: vit_large_patch14_dinov2.lvd142m
+numpy
+pillow
+opencv-python-headless<5   # 5.x removed CascadeClassifier used by the face gate
+scikit-learn       # logistic-regression head + ROC metrics
+pyarrow            # parquet embedding shards
+matplotlib         # evaluation plots
+
+# curation / dataset-build stages only (not needed for predict_v2.py)
+datasets
+huggingface_hub
+open_clip_torch    # photoreal-vs-stylized filter
+gradio             # demo UI (ui.py)

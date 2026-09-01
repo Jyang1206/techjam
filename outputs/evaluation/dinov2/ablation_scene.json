@@ -1,0 +1,34 @@
+[
+ {
+  "model": "logreg",
+  "features": "dino",
+  "train_views": "canonical",
+  "val_auc": 0.9819915177084223,
+  "train_rows": 35640,
+  "secs": 3.1
+ },
+ {
+  "model": "mlp",
+  "features": "dino",
+  "train_views": "canonical",
+  "val_auc": 0.9912335120456462,
+  "train_rows": 35640,
+  "secs": 6.1
+ },
+ {
+  "model": "logreg",
+  "features": "dino+fft",
+  "train_views": "canonical",
+  "val_auc": 0.9855288821240029,
+  "train_rows": 35640,
+  "secs": 4.9
+ },
+ {
+  "model": "mlp",
+  "features": "dino+fft",
+  "train_views": "canonical",
+  "val_auc": 0.9929186364280791,
+  "train_rows": 35640,
+  "secs": 1.5
+ }
+]

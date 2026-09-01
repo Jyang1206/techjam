@@ -1,0 +1,66 @@
+[
+ {
+  "model": "logreg",
+  "features": "dino",
+  "train_views": "canonical",
+  "val_auc": 0.8335885570046276,
+  "train_rows": 23659,
+  "secs": 4.9
+ },
+ {
+  "model": "mlp",
+  "features": "dino",
+  "train_views": "canonical",
+  "val_auc": 0.8272074977796475,
+  "train_rows": 23659,
+  "secs": 3.8
+ },
+ {
+  "model": "logreg",
+  "features": "dino+fft",
+  "train_views": "canonical",
+  "val_auc": 0.842848712195578,
+  "train_rows": 23659,
+  "secs": 6.9
+ },
+ {
+  "model": "mlp",
+  "features": "dino+fft",
+  "train_views": "canonical",
+  "val_auc": 0.8349039405412987,
+  "train_rows": 23659,
+  "secs": 1.2
+ },
+ {
+  "model": "logreg",
+  "features": "dino",
+  "train_views": "all_views",
+  "val_auc": 0.8227396812041322,
+  "train_rows": 165613,
+  "secs": 17.5
+ },
+ {
+  "model": "mlp",
+  "features": "dino",
+  "train_views": "all_views",
+  "val_auc": 0.7862273874631889,
+  "train_rows": 165613,
+  "secs": 3.9
+ },
+ {
+  "model": "logreg",
+  "features": "dino+fft",
+  "train_views": "all_views",
+  "val_auc": 0.8320261300425372,
+  "train_rows": 165613,
+  "secs": 37.5
+ },
+ {
+  "model": "mlp",
+  "features": "dino+fft",
+  "train_views": "all_views",
+  "val_auc": 0.8072808862712102,
+  "train_rows": 165613,
+  "secs": 3.1
+ }
+]

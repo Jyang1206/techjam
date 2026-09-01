@@ -1,0 +1,102 @@
+[
+ {
+  "image_path": "/home/ubuntu/smoke_test/face_0_04aed1eaaaa9d039.png",
+  "pred": 0.039289
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/face_0_0b87419dc3d45122.png",
+  "pred": 0.713675
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/face_0_95655fcff42a9e74.png",
+  "pred": 0.435411
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/face_0_aa23a963555f2913.png",
+  "pred": 0.533193
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/face_0_ed7e1fc5656608cf.png",
+  "pred": 0.076128
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/face_1_7deb688aff2cf115.png",
+  "pred": 0.909386
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/face_1_838aeb31b8bbe23b.png",
+  "pred": 0.413999
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/face_1_9037ed37a510ab1b.png",
+  "pred": 0.998468
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/face_1_ae1a948cf12b611d.png",
+  "pred": 0.985375
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/face_1_eeb494c8f60a629e.png",
+  "pred": 0.886198
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/holdout185_1.jpg",
+  "pred": 0.081834
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/holdout185_2.jpg",
+  "pred": 6e-06
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/holdout185_3.jpg",
+  "pred": 9e-06
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/holdout185_4.jpg",
+  "pred": 0.008037
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/holdout185_5.jpg",
+  "pred": 0.000136
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/scene_0_2157ac522717a447.jpg",
+  "pred": 0.010195
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/scene_0_5456dc8c95690d36.jpg",
+  "pred": 0.0
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/scene_0_7ecf5efcf22c03a0.jpg",
+  "pred": 0.231104
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/scene_0_bc96c36932132593.jpg",
+  "pred": 0.000269
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/scene_0_c5498dc59669e696.jpg",
+  "pred": 8.2e-05
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/scene_1_31277e913465f154.png",
+  "pred": 0.000378
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/scene_1_3b3a1de2ab9680cf.png",
+  "pred": 0.999984
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/scene_1_89580480af800ebe.png",
+  "pred": 0.999998
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/scene_1_c26514216b0ea9fb.png",
+  "pred": 0.99989
+ },
+ {
+  "image_path": "/home/ubuntu/smoke_test/scene_1_f804b7dc1c720490.png",
+  "pred": 1.0
+ }
+]
